@@ -11,3 +11,4 @@ dist/
 !.env.example
 session.json
 launcher.log
+preview.png

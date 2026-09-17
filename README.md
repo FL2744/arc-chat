@@ -31,12 +31,14 @@ python -m venv .venv
 
 The helper opens the HTML interface at a local address with a random access token. Keep the terminal open. No web hosting, Node.js, API SDK, or ARC-side software installation is required. Do not expose port 8765 to the network.
 
+Student Mode uses the selected course profile and keeps infrastructure details out of the normal workflow. Set `ARC_COURSE_ALLOCATION` to the instructor-provided course allocation before using **Start course workspace**. If that variable is not present, switch to Advanced Mode and select an authorized allocation manually in OOD. The repository contains no personal or public default allocation.
+
 ## Connect and work
 
-1. Enable VT VPN if needed. Click **Open ARC / sign in**, and complete VT credentials and MFA in the Chromium window.
-2. Click **Prepare Jupyter**. The helper attempts to open Jupyter and select Falcon and the supplied account (`will_taggart_mcll` is prefilled; replace it with your authorized allocation). Review resources and walltime and click **Launch reviewed job** in the chat (or **Launch** in OOD). If site labels differ, fill in the form manually. Provisioning is deliberately user-submitted; the helper does not guess resource settings.
+1. Set `ARC_COURSE_ALLOCATION` when using Student Mode, enable VT VPN if needed, and click **Start course workspace**. Complete VT credentials and MFA in the visible Chromium window.
+2. Review resources and walltime in OOD, then click **Launch** there or **Launch reviewed job** in Advanced Mode. If site labels differ, fill in the form manually. Provisioning is deliberately user-submitted; the helper does not guess resource settings.
 3. Once the job is ready, click **Connect ready session** in the chat (or **Connect to Jupyter** in OOD), then **Attach to Jupyter** in the chat. The helper captures the opened tab and attaches automatically. For a manually opened tab, click Attach automatically; if several distinct servers are open, choose a session button. This creates a new persistent Python kernel and a uniquely named `ARC-chat-….ipynb` notebook in the Jupyter root. Choose an installed kernel name if `python3` is unavailable.
-4. Enter your personal ARC or OpenAI API key and a model ID that supports function calling. ARC defaults to `https://llm-api.arc.vt.edu/api/v1` and `gpt-oss-120b`. OpenAI uses `https://api.openai.com/v1`; enter a model available to your account.
+4. Enter your personal ARC API key. Student Mode uses the Virginia Tech ARC endpoint and the course profile's model policy. OpenAI and custom OpenAI-compatible endpoints remain available in Advanced Mode; all endpoints must use HTTPS and may not target local/private addresses.
 5. Send a request, review proposed Python, and click **Run Python**. Outputs appear as they arrive. Click **Continue with outputs** to let the model inspect the results and propose the next step. Each proposed execution requires a click; there is no unattended execution loop.
 6. Reply to Python `input()` and `getpass()` prompts in the input box. Input answers are omitted from chatbot history, but the Python program itself can print or save them. Never put API keys directly into chat or source cells; use `getpass.getpass()`.
 7. Use **Files & results** to upload individual local files and download outputs. Uploaded files receive unique names; use the reported path. Upload complete project folders through Jupyter to preserve filenames and relative imports. Refresh files to see generated `.xlsx` and `.html` outputs. Export dialogue separately if needed.
@@ -70,7 +72,7 @@ This runs notebook source within the chat kernel and supports interactive prompt
 - HTML previews are sandboxed with scripts/network disabled. Download trusted interactive maps to run them locally. Widgets and binary widget protocols are not supported; updated displays are retained as additional snapshots.
 - No automatic retry of Python after a dropped connection. Check the kernel in Jupyter before restarting the helper. A restarted helper creates a new kernel; it does not resume old chat state. Save/export work before closing.
 - Large files should use Jupyter's native file interface. This helper supports individual uploads up to 20 MB in the UI.
-- If installation was interrupted, rerun `start.command`. If Chromium cannot launch, run `.venv/bin/python -m playwright install chromium`.
+- If installation was interrupted, rerun `start.command` (or `start.ps1` on Windows). If Chromium cannot launch, run `.venv/bin/python -m playwright install chromium` on macOS/Linux or `.venv\Scripts\python.exe -m playwright install chromium` on Windows.
 
 ## Tests
 
@@ -84,6 +86,12 @@ Sources: [ARC OOD](https://www.docs.arc.vt.edu/resources/ood.html), [ARC model A
 
 Optional integration test (local only): install `jupyter-server ipykernel nbformat` into the virtual environment, then run `.venv/bin/python integration_test.py`. It uses ports 8765 and 8877 and temporary files.
 
+### Course profiles and diagnostics
+
+The built-in `fl2744` profile reads its allocation from `ARC_COURSE_ALLOCATION`. For another course or a managed deployment, point `ARC_CHAT_PROFILE_FILE` at a JSON file with a `profiles` list; each profile may define `id`, `name`, `workspace_backend`, `cluster`, `allocation`, `resource_profile`, `model_provider`, `model_policy`, and `advanced_mode`. Allocation values may reference an environment variable such as `${ARC_COURSE_ALLOCATION}`. Do not put API keys, passwords, browser cookies, or notebook content in profile files. See `profiles.example.json`.
+
+Use **Run diagnostics** to generate an in-app health report. It contains runtime, browser, workspace, and model-configuration status but excludes credentials, cookies, chat content, and notebook contents.
+
 ### Navigation timeout on opening ARC
 
 The helper now waits only for navigation to begin, rather than for every page resource to load. A timeout preserves the visible browser tab and provides recovery guidance. If the VT login page is visible, complete login and MFA there. If the tab is blank or unreachable, connect VT VPN and reload it; test OOD in your usual browser as well. Clicking Open ARC again brings the existing login tab forward without discarding authentication. After updating helper.py, restart the helper to load the fix.
@@ -94,4 +102,4 @@ Automatic attachment tracks the tab opened by Connect ready session (including p
 
 The helper continuously reads kernel WebSocket messages between code runs to maintain ping/pong. If the connection closes while idle, new execution reconnects to the same existing kernel without clearing variables or history. Busy kernels are preserved and require waiting or interruption; code is never automatically replayed after a mid-execution disconnect.
 
-Recovery from an OOD 502/503/504: check My Interactive Sessions for a reachable running Jupyter job. Connect ready session can switch from a stale server to the newly opened server without deleting the old kernel or files. Disconnect old session clears only local connection references when needed. Switching servers creates a fresh Python workspace; saved files remain on their original filesystem, but in-memory variables are not transferred. Updating the files does not hot-reload a running helper: quit the helper and reopen the app to use build 2026.09.17.3.
+Recovery from an OOD 502/503/504: check My Interactive Sessions for a reachable running Jupyter job. Connect ready session can switch from a stale server to the newly opened server without deleting the old kernel or files. Disconnect old session clears only local connection references when needed. Switching servers creates a fresh Python workspace; saved files remain on their original filesystem, but in-memory variables are not transferred. Updating the files does not hot-reload a running helper: quit the helper and reopen the app to use build 2026.09.17.4.

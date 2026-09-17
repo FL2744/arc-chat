@@ -5,7 +5,7 @@ app=root/'dist/ARC Chat.app'
 app.parent.mkdir(exist_ok=True)
 subprocess.run(['osacompile','-o',str(app),str(root/'macos/app.applescript')],check=True)
 resources=app/'Contents/Resources'
-for name in ('helper.py','arc-chat.html','requirements.txt'):
+for name in ('helper.py','arc-chat.html','requirements.txt','config.py','state.py','model_providers.py','diagnostics.py'):
     shutil.copy2(root/name,resources/name)
 for name in ('launcher.py','launch.sh'):
     shutil.copy2(root/'macos'/name,resources/name)

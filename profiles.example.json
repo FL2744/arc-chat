@@ -1,0 +1,15 @@
+{
+  "profiles": [
+    {
+      "id": "fl2744",
+      "name": "FL 2744",
+      "workspace_backend": "arc_jupyter",
+      "cluster": "Falcon",
+      "allocation": "${ARC_COURSE_ALLOCATION}",
+      "resource_profile": "classroom-small",
+      "model_provider": "arc_shared",
+      "model_policy": "instructor_default",
+      "advanced_mode": false
+    }
+  ]
+}
