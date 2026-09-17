@@ -4,9 +4,9 @@ One self-contained HTML interface plus a local Python browser/Jupyter helper. Th
 
 ## Downloads
 
-[Windows bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.3.0/ARC-Chat-Windows.zip) | [macOS bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.3.0/ARC-Chat-macOS.zip) | [Linux bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.3.0/ARC-Chat-Linux.zip) | [Source archive](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.3.0/ARC-Chat-source.zip) | [Release notes](https://github.com/FL2744/arc-chat/releases/tag/v0.3.0)
+[Windows bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.4.0/ARC-Chat-Windows.zip) | [macOS bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.4.0/ARC-Chat-macOS.zip) | [Linux bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.4.0/ARC-Chat-Linux.zip) | [Source archive](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.4.0/ARC-Chat-source.zip) | [Release notes](https://github.com/FL2744/arc-chat/blob/v0.4.0/docs/RELEASE_v0.4.0.md)
 
-The links above are published through ordinary Git rather than the GitHub Release asset API, which makes the classroom-sized downloads independently recoverable from release-service outages. SHA-256 files are stored beside each download on the `release-assets-v0.3.0` branch.
+The links above are published through ordinary Git rather than the GitHub Release asset API, which makes the classroom-sized downloads independently recoverable from release-service outages. SHA-256 files are stored beside each download on the `release-assets-v0.4.0` branch.
 
 **Windows:** unzip **ARC-Chat-Windows.zip**, then double-click **ARC Chat.cmd**. Python 3.10+ is required; first launch creates the local runtime and downloads the compatible Chromium browser.
 
