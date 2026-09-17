@@ -33,11 +33,10 @@ class EndpointPolicy:
             address = ipaddress.ip_address(host)
         except ValueError:
             address = None
-        # Literal endpoints must be globally routable.  This blocks private,
-        # loopback, link-local, carrier-grade NAT, benchmark, multicast,
-        # reserved, and unspecified address ranges rather than maintaining an
-        # incomplete hand-written list of special cases.
-        if address and not address.is_global:
+        # Literal endpoints must be globally routable unicast addresses. Some
+        # Python releases classify multicast as global, so reject multicast and
+        # unspecified literals explicitly in addition to the is_global check.
+        if address and (not address.is_global or address.is_multicast or address.is_unspecified):
             raise ValueError("Model API URL cannot target a non-global IP address.")
         if not allow_custom and value not in {ARC_ENDPOINT, OPENAI_ENDPOINT}:
             raise ValueError("This course profile only permits the configured model provider.")
