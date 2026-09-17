@@ -18,6 +18,9 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(profile.allocation, "${ARC_COURSE_ALLOCATION}")
         self.assertEqual(profile.resolved_allocation({}), "")
         self.assertEqual(profile.resolved_allocation({"ARC_COURSE_ALLOCATION": "course-project"}), "course-project")
+        self.assertTrue(profile.allows_model("arc", "gpt-oss-120b", False))
+        self.assertFalse(profile.allows_model("openai", "gpt-oss-120b", False))
+        self.assertFalse(profile.allows_model("arc", "unapproved-model", False))
 
     def test_profile_file_overlays_builtin_profiles(self):
         with tempfile.TemporaryDirectory() as directory:

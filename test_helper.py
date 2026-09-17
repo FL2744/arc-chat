@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from aiohttp import WSMsgType, web
 from helper import BrowserTimeout, BrowserError, Bridge, base_url, decode_packet, message, guard, TOKEN, tls_context
+from config import get_profile
 
 class ProtocolTests(unittest.TestCase):
     def test_tls_requires_valid_certificate_and_hostname(self):
@@ -164,6 +165,7 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(b.history[-1]['tool_call_id'],'abc')
     async def test_model_tool_roundtrip(self):
         b=Bridge(); b.kernel='test-kernel'
+        b.profile=get_profile('default')
         class Response:
             status=200
             async def __aenter__(self): return self

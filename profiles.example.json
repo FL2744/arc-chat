@@ -9,6 +9,7 @@
       "resource_profile": "classroom-small",
       "model_provider": "arc_shared",
       "model_policy": "instructor_default",
+      "allowed_models": ["gpt-oss-120b"],
       "advanced_mode": false
     }
   ]

@@ -8,12 +8,14 @@ from playwright.async_api import async_playwright, TimeoutError as BrowserTimeou
 from config import get_profile
 from diagnostics import Doctor
 from model_providers import ARC_ENDPOINT, build_provider
+from ood import OODBrowserAdapter
 from state import AppState, AppStateMachine, InvalidTransition
+from workspace import JupyterWorkspace
 
 ROOT = Path(__file__).parent
 TOKEN = secrets.token_urlsafe(32)
 PORT = 8765
-BUILD = '2026.09.17.4'
+BUILD = '2026.09.17.5'
 PROTOCOL_VERSION = 1
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
@@ -54,6 +56,7 @@ class Bridge:
         self.clients = set()
         self.build = BUILD
         self.protocol_version = PROTOCOL_VERSION
+        self.model_config = {'provider': 'arc', 'endpoint': ARC_ENDPOINT, 'model': 'gpt-oss-120b'}
         self.state_machine = AppStateMachine()
         self.state_machine.transition(AppState.READY_LOCAL, 'Local helper started.')
         try:
@@ -62,6 +65,8 @@ class Bridge:
         except ValueError as exc:
             self.profile = get_profile('default')
             self.profile_error = str(exc)
+        self.ood = OODBrowserAdapter(self)
+        self.workspace = JupyterWorkspace(self)
 
     async def set_state(self, target, reason='', *, force=False):
         try:
@@ -99,6 +104,10 @@ class Bridge:
         finally:
             if temporary.exists():
                 temporary.unlink()
+
+    @staticmethod
+    def quote_path(path):
+        return quote(path, safe='/')
 
     async def emit(self, event_type, **data):
         for ws in list(self.clients):
@@ -167,8 +176,8 @@ class Bridge:
                 'switch to Advanced Mode for manual OOD selection.'
             )
         if not self.context:
-            await self.browser_open()
-        return await self.prepare(allocation)
+            await self.ood.open()
+        return await self.ood.prepare(allocation)
 
     async def browser_click(self, action):
         if not self.context: raise ValueError('Open ARC and sign in first.')
@@ -292,6 +301,15 @@ class Bridge:
         await self.emit('input_done')
         await self.emit('proposal_done')
 
+    async def stop_workspace(self):
+        await self.set_state(AppState.SHUTTING_DOWN, 'Stopping the chat kernel.', force=True)
+        if self.session: await self.api('DELETE','api/sessions/'+self.session)
+        if self.channel: await self.channel.close()
+        self.kernel=self.session=None; self.pending=None
+        await self.set_state(AppState.READY_LOCAL, 'Chat kernel stopped; the OOD allocation remains user-managed.', force=True)
+        self.persist_state()
+        return 'Kernel stopped. End the OOD job in My Interactive Sessions to release the allocation.'
+
     async def open_channel(self):
         if self.reader:
             self.reader.cancel()
@@ -383,6 +401,13 @@ class Bridge:
         if not self.key: raise ValueError('Enter your own API key.')
         model = str(data.get('model', '')).strip()
         if not model: raise ValueError('Choose a model that supports tool calling.')
+        provider_name = data.get('provider', 'custom')
+        advanced = bool(data.get('advanced', self.profile.advanced_mode))
+        if not self.profile.allows_model(provider_name, model, advanced):
+            allowed = ', '.join(sorted(self.profile.allowed_provider_names(advanced)))
+            raise ValueError(f'Model provider/model is not permitted by course profile {self.profile.name!r}. Allowed providers: {allowed}.')
+        if provider_name == 'arc' and endpoint != ARC_ENDPOINT:
+            raise ValueError('Virginia Tech ARC models must use the configured ARC endpoint.')
         if data.get('text'): self.history.append({'role':'user','content':data['text']})
         system = ('You are a Python research assistant using a persistent remote Jupyter kernel on VT ARC. '
             'Use run_python for computation and file work. User reviews every call. Never claim unobserved results. '
@@ -393,13 +418,8 @@ class Bridge:
         body={'model':model,'messages':[{'role':'system','content':system}]+self.history,
               'tools':[{'type':'function','function':{'name':'run_python','description':'Execute Python in the persistent ARC Jupyter kernel.',
               'parameters':{'type':'object','properties':{'code':{'type':'string'}},'required':['code'],'additionalProperties':False}}}]}
-        provider_name = data.get('provider', 'custom')
-        advanced = data.get('advanced', True)
-        if not advanced and provider_name == 'custom':
-            raise ValueError('Custom model endpoints are available only in Advanced Mode.')
-        if not advanced and provider_name == 'arc' and endpoint != ARC_ENDPOINT:
-            raise ValueError('Student Mode only permits the Virginia Tech ARC model endpoint.')
         provider = build_provider(self.http, provider_name, endpoint, self.key)
+        self.model_config = {'provider': provider_name, 'endpoint': endpoint, 'model': model}
         result=await provider.complete(body)
         msg=result['choices'][0]['message']
         calls=msg.get('tool_calls') or []
@@ -419,27 +439,28 @@ class Bridge:
         if action=='quit':
             asyncio.get_running_loop().call_later(1,os.kill,os.getpid(),signal.SIGTERM)
             return 'Stopping helper and chat kernel. End the OOD job separately to release the allocation.'
-        if action=='open': return await self.browser_open()
+        if action=='open': return await self.ood.open()
         if action=='start_workspace': return await self.start_workspace()
-        if action=='prepare': return await self.prepare(d['account'])
-        if action=='launch': return await self.browser_click(action)
+        if action=='prepare': return await self.ood.prepare(d['account'])
+        if action=='launch': return await self.ood.launch()
         if action=='connect':
-            await self.browser_click(action)
-            return await self.attach(await self.discover_jupyter(),d.get('kernel','python3'))
+            await self.ood.connect()
+            return await self.workspace.start(await self.ood.discover_jupyter(),d.get('kernel','python3'))
         if action=='detach':
             await self.detach()
             self.jupyter_page=None
             return 'Disconnected from the old session without deleting its kernel or files. Open the running Jupyter job, then choose Attach automatically.'
-        if action=='attach': return await self.attach(d.get('url',''),d.get('kernel','python3'))
+        if action=='attach': return await self.workspace.start(d.get('url',''),d.get('kernel','python3'))
         if action=='doctor':
-            report = await Doctor(self).run()
+            report = await Doctor(self).run(full=bool(d.get('full', False)))
             await self.emit('doctor', report=report)
-            return 'Diagnostics ready. No credentials, cookies, chat content, or notebook contents were included.'
+            return ('Full diagnostics ready. The explicit remote checks may have created one temporary file and one smoke-test cell, both user-visible.' if d.get('full') else
+                    'Diagnostics ready. No credentials, cookies, chat content, or notebook contents were included.')
         if action=='chat': return await self.chat(d)
         if action=='run':
             pending=self.pending
             if pending and d['code']!=pending['code']: raise ValueError('Reject the proposal before running edited code manually.')
-            result=await self.execute(d['code'])
+            result=await self.workspace.execute(d['code'])
             if pending:
                 self.history.append({'role':'tool','tool_call_id':pending['id'],'content':result})
                 self.pending=None
@@ -471,14 +492,7 @@ class Bridge:
                 if f['format']=='json': content=json.dumps(content,indent=2)
                 content=base64.b64encode(content.encode('utf-8')).decode('ascii')
             await self.emit('download',name=f['name'],content=content); return 'Downloaded.'
-        if action=='shutdown':
-            await self.set_state(AppState.SHUTTING_DOWN, 'Stopping the chat kernel.', force=True)
-            if self.session: await self.api('DELETE','api/sessions/'+self.session)
-            if self.channel: await self.channel.close()
-            self.kernel=self.session=None; self.pending=None
-            await self.set_state(AppState.READY_LOCAL, 'Chat kernel stopped; the OOD allocation remains user-managed.', force=True)
-            self.persist_state()
-            return 'Kernel stopped. End the OOD job in My Interactive Sessions to release the allocation.'
+        if action=='shutdown': return await self.workspace.stop()
         raise ValueError('Unknown action.')
 
 bridge=Bridge()

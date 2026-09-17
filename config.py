@@ -28,6 +28,7 @@ class CourseProfile:
     resource_profile: str = "classroom-small"
     model_provider: str = "arc_shared"
     model_policy: str = "instructor_default"
+    allowed_models: tuple[str, ...] = ()
     advanced_mode: bool = False
 
     def __post_init__(self) -> None:
@@ -39,6 +40,8 @@ class CourseProfile:
             raise ValueError(f"Unsupported workspace backend: {self.workspace_backend}")
         if self.model_provider not in {"arc_shared", "openai", "custom"}:
             raise ValueError(f"Unsupported model provider: {self.model_provider}")
+        if any(not isinstance(model, str) or not model.strip() for model in self.allowed_models):
+            raise ValueError("allowed_models must contain non-empty model IDs.")
 
     def resolved_allocation(self, environ: Mapping[str, str] | None = None) -> str:
         """Return the configured allocation, resolving ``${VAR}`` safely."""
@@ -59,6 +62,18 @@ class CourseProfile:
             data["allocation"] = ""
         return data
 
+    def allowed_provider_names(self, advanced: bool) -> set[str]:
+        """Return protocol provider names permitted by this profile."""
+        if advanced and self.model_policy == "user_selected":
+            return {"arc", "openai", "custom"}
+        provider = {"arc_shared": "arc", "openai": "openai", "custom": "custom"}[self.model_provider]
+        return {provider}
+
+    def allows_model(self, provider: str, model: str, advanced: bool) -> bool:
+        if provider not in self.allowed_provider_names(advanced):
+            return False
+        return not self.allowed_models or model in self.allowed_models
+
 
 # This profile is intentionally useful without embedding a person's allocation.
 # An instructor can distribute ARC_COURSE_ALLOCATION or a profile file.
@@ -71,6 +86,7 @@ BUILTIN_PROFILES: dict[str, CourseProfile] = {
         resource_profile="classroom-small",
         model_provider="arc_shared",
         model_policy="instructor_default",
+        allowed_models=("gpt-oss-120b",),
         advanced_mode=False,
     ),
     "default": CourseProfile(
@@ -86,7 +102,7 @@ BUILTIN_PROFILES: dict[str, CourseProfile] = {
 
 def _profile_from_mapping(value: Mapping[str, Any]) -> CourseProfile:
     allowed = {"id", "name", "workspace_backend", "cluster", "allocation",
-               "resource_profile", "model_provider", "model_policy", "advanced_mode"}
+               "resource_profile", "model_provider", "model_policy", "allowed_models", "advanced_mode"}
     unknown = set(value) - allowed
     if unknown:
         raise ValueError("Unknown course profile fields: " + ", ".join(sorted(unknown)))
