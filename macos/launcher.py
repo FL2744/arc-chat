@@ -1,5 +1,5 @@
 """Standard-library bootstrap for the macOS app; no Terminal window required."""
-import fcntl, json, os, pathlib, subprocess, sys, time, urllib.request, shutil
+import fcntl, json, os, pathlib, subprocess, sys, time, urllib.request, shutil, hashlib
 
 resources = pathlib.Path(__file__).resolve().parent
 support = pathlib.Path.home() / 'Library/Application Support/ARC Chat'
@@ -49,6 +49,13 @@ with open(support / 'launcher.log', 'a') as log:
                 env = os.environ | {'PLAYWRIGHT_BROWSERS_PATH':str(browsers)}
                 subprocess.run([str(python),'-m','playwright','install','chromium'],env=env,check=True,stdout=log,stderr=log)
                 marker.touch()
+        # Refresh dependencies when a new app version changes requirements.
+        requirements = resources / 'requirements.txt'
+        digest = hashlib.sha256(requirements.read_bytes()).hexdigest()
+        dependency_marker = python.parent.parent / '.arc-chat-requirements'
+        if not dependency_marker.exists() or dependency_marker.read_text() != digest:
+            subprocess.run([str(python),'-m','pip','install','-r',str(requirements)],check=True,stdout=log,stderr=log)
+            dependency_marker.write_text(digest)
         env = os.environ | {'PLAYWRIGHT_BROWSERS_PATH':str(browsers), 'ARC_CHAT_STATE':str(state), 'PYTHONUNBUFFERED':'1'}
         # An older Terminal-launched helper may own this port; do not kill it.
         try:

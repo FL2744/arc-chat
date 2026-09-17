@@ -1,10 +1,15 @@
-import json, struct, unittest
+import json, ssl, struct, unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from aiohttp import WSMsgType, web
-from helper import BrowserTimeout, BrowserError, Bridge, base_url, decode_packet, message, guard, TOKEN
+from helper import BrowserTimeout, BrowserError, Bridge, base_url, decode_packet, message, guard, TOKEN, tls_context
 
 class ProtocolTests(unittest.TestCase):
+    def test_tls_requires_valid_certificate_and_hostname(self):
+        context = tls_context()
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+
     def test_proxy_base(self):
         self.assertEqual(base_url('https://ood.arc.vt.edu/node/gpu/123/tree/a?token=x'),'https://ood.arc.vt.edu/node/gpu/123/')
         self.assertEqual(base_url('http://127.0.0.1:8888/lab'),'http://127.0.0.1:8888/')

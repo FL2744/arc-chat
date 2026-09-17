@@ -1,8 +1,9 @@
 """Local-only ARC browser/Jupyter bridge. Credentials remain in memory."""
-import asyncio, base64, datetime, json, os, re, secrets, signal, struct, uuid, webbrowser
+import asyncio, base64, datetime, json, os, re, secrets, signal, ssl, struct, uuid, webbrowser
+import truststore
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit, quote
-from aiohttp import web, ClientSession, ClientTimeout, WSMsgType
+from aiohttp import web, ClientSession, ClientTimeout, WSMsgType, TCPConnector
 from playwright.async_api import async_playwright, TimeoutError as BrowserTimeout, Error as BrowserError
 from config import get_profile
 from diagnostics import Doctor
@@ -547,8 +548,13 @@ async def socket(request):
         if tasks: await asyncio.gather(*tasks,return_exceptions=True)
     return ws
 
+def tls_context():
+    """Verify HTTPS with native system roots (including macOS Keychain)."""
+    return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
 async def lifecycle(app):
-    bridge.http=ClientSession(timeout=ClientTimeout(total=60))
+    bridge.http=ClientSession(timeout=ClientTimeout(total=60),
+                             connector=TCPConnector(ssl=tls_context()))
     yield
     if bridge.channel: await bridge.channel.close()
     if bridge.session:
