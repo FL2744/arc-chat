@@ -4,7 +4,7 @@ One self-contained HTML interface plus a local Python browser/Jupyter helper. Th
 
 ## macOS download
 
-[Download ARC Chat for macOS](https://github.com/FL2744/arc-chat/releases/download/v0.2.2/ARC-Chat-macOS.zip) · [Windows](https://github.com/FL2744/arc-chat/releases/download/v0.2.2/ARC-Chat-Windows.zip) · [Linux](https://github.com/FL2744/arc-chat/releases/download/v0.2.2/ARC-Chat-Linux.zip) · [Release notes](https://github.com/FL2744/arc-chat/releases/tag/v0.2.2)
+[Download ARC Chat for macOS](https://github.com/FL2744/arc-chat/releases/download/v0.2.3/ARC-Chat-macOS.zip) · [Windows](https://github.com/FL2744/arc-chat/releases/download/v0.2.3/ARC-Chat-Windows.zip) · [Linux](https://github.com/FL2744/arc-chat/releases/download/v0.2.3/ARC-Chat-Linux.zip) · [Release notes](https://github.com/FL2744/arc-chat/releases/tag/v0.2.3)
 
 Unzip the download, move **ARC Chat.app** to Applications, and double-click it. Requires **Python 3.10+** and internet access for first-time dependency and Chromium downloads. This preview is ad-hoc signed, not Apple-notarized; macOS may require explicit approval to open it. VT VPN is still required off campus.
 
