@@ -39,6 +39,8 @@ jobs:
         run: |
           ditto -c -k --sequesterRsrc --keepParent "dist/ARC Chat.app" ARC-Chat-macOS.zip
           shasum -a 256 ARC-Chat-macOS.zip > ARC-Chat-macOS.zip.sha256
+          cp dist/portable/ARC-Chat-macOS-Portable.zip .
+          cp dist/portable/ARC-Chat-macOS-Portable.zip.sha256 .
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -46,8 +48,8 @@ jobs:
           path: |
             ARC-Chat-macOS.zip
             ARC-Chat-macOS.zip.sha256
-            dist/portable/ARC-Chat-macOS-Portable.zip
-            dist/portable/ARC-Chat-macOS-Portable.zip.sha256
+            ARC-Chat-macOS-Portable.zip
+            ARC-Chat-macOS-Portable.zip.sha256
 
   windows:
     name: Build Windows portable preview
@@ -70,13 +72,18 @@ jobs:
         run: python distribution/build_portable.py
       - name: Smoke-test self-contained Windows package
         run: python distribution/smoke_portable.py dist/portable/ARC-Chat
+      - name: Stage Windows release artifacts
+        shell: pwsh
+        run: |
+          Copy-Item dist/portable/ARC-Chat-Windows-Portable.zip .
+          Copy-Item dist/portable/ARC-Chat-Windows-Portable.zip.sha256 .
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ARC-Chat-Windows-Portable
           path: |
-            dist/portable/ARC-Chat-Windows-Portable.zip
-            dist/portable/ARC-Chat-Windows-Portable.zip.sha256
+            ARC-Chat-Windows-Portable.zip
+            ARC-Chat-Windows-Portable.zip.sha256
 
   source:
     name: Package source and bootstrap previews
