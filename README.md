@@ -4,13 +4,17 @@ One self-contained HTML interface plus a local Python browser/Jupyter helper. Th
 
 ## Downloads
 
-[Windows portable](https://github.com/FL2744/arc-chat/releases/download/v0.3.0/ARC-Chat-Windows-Portable.zip) · [macOS portable](https://github.com/FL2744/arc-chat/releases/download/v0.3.0/ARC-Chat-macOS-Portable.zip) · [macOS lightweight bootstrap](https://github.com/FL2744/arc-chat/releases/download/v0.3.0/ARC-Chat-macOS.zip) · [Linux bootstrap](https://github.com/FL2744/arc-chat/releases/download/v0.3.0/ARC-Chat-Linux.zip) · [Release notes](https://github.com/FL2744/arc-chat/releases/tag/v0.3.0)
+[Windows bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.3.0/ARC-Chat-Windows.zip) | [macOS bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.3.0/ARC-Chat-macOS.zip) | [Linux bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.3.0/ARC-Chat-Linux.zip) | [Source archive](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.3.0/ARC-Chat-source.zip) | [Release notes](https://github.com/FL2744/arc-chat/releases/tag/v0.3.0)
 
-**Windows:** unzip the whole portable archive and double-click **ARC-Chat.exe** inside the extracted `ARC-Chat` folder. The portable build bundles Python, ARC Chat's dependencies, and the compatible headful Chromium runtime used for visible VT login/MFA. It does not require a separate Python installation or a first-run browser download.
+The links above are published through ordinary Git rather than the GitHub Release asset API, which makes the classroom-sized downloads independently recoverable from release-service outages. SHA-256 files are stored beside each download on the `release-assets-v0.3.0` branch.
 
-**macOS:** the portable archive is the self-contained classroom build. Unzip it, move **ARC-Chat.app** to Applications, and open it. The smaller **ARC-Chat-macOS.zip** remains available as a bootstrap fallback, but it requires Python 3.10+ and downloads dependencies/Chromium on first launch. Preview builds are not Apple-notarized, so macOS may require explicit approval to open them.
+**Windows:** unzip **ARC-Chat-Windows.zip**, then double-click **ARC Chat.cmd**. Python 3.10+ is required; first launch creates the local runtime and downloads the compatible Chromium browser.
 
-**Linux:** the current release remains an advanced/bootstrap path. Run `./arc-chat`; Python 3.10+ and internet access are required for first-time dependency and Chromium setup.
+**macOS:** unzip **ARC-Chat-macOS.zip**, move **ARC Chat.app** to Applications, and open it. First launch creates the local runtime and downloads dependencies/Chromium. Preview builds are not Apple-notarized, so macOS may require explicit approval to open them.
+
+**Linux:** run `./arc-chat`; Python 3.10+ and internet access are required for first-time dependency and Chromium setup.
+
+Self-contained Windows/macOS packages are still built and smoke-tested by CI. They are intentionally kept as CI artifacts rather than normal Git objects because the bundled browser makes them larger than GitHub's 100 MB Git object limit.
 
 VT VPN is still required when normal ARC access requires it.
 

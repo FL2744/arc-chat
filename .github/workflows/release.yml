@@ -95,7 +95,8 @@ jobs:
         run: |
           git archive --format=zip --prefix=arc-chat-${GITHUB_REF_NAME}/ -o ARC-Chat-source.zip HEAD
           sha256sum ARC-Chat-source.zip > ARC-Chat-source.zip.sha256
-          python distribution/build_bundles.py Linux
+          python distribution/build_bundles.py Windows Linux
+          cp dist/ARC-Chat-Windows.zip dist/ARC-Chat-Windows.zip.sha256 .
           cp dist/ARC-Chat-Linux.zip dist/ARC-Chat-Linux.zip.sha256 .
       - name: Upload source artifacts
         uses: actions/upload-artifact@v4
@@ -104,6 +105,8 @@ jobs:
           path: |
             ARC-Chat-source.zip
             ARC-Chat-source.zip.sha256
+            ARC-Chat-Windows.zip
+            ARC-Chat-Windows.zip.sha256
             ARC-Chat-Linux.zip
             ARC-Chat-Linux.zip.sha256
 
@@ -113,6 +116,10 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
+      - name: Check out repository for git publication
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Download macOS artifacts
         uses: actions/download-artifact@v4
         with:
@@ -142,66 +149,77 @@ jobs:
             ARC-Chat-macOS.zip.sha256 \
             ARC-Chat-source.zip \
             ARC-Chat-source.zip.sha256 \
+            ARC-Chat-Windows.zip \
+            ARC-Chat-Windows.zip.sha256 \
             ARC-Chat-Linux.zip \
             ARC-Chat-Linux.zip.sha256; do
             test -s "release/$file"
           done
-      - name: Publish GitHub release with per-asset retries
+      - name: Publish API-free download branch
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          ASSET_BRANCH: release-assets-${{ github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          # GitHub's Release API has proven flaky for this repository. Keep the
+          # classroom-sized downloads on a normal Git ref instead, using the same
+          # authenticated git transport as source pushes. Large self-contained
+          # portable bundles remain CI artifacts because Git rejects files >100 MB.
+          stage="$(mktemp -d)"
+          trap 'rm -rf "$stage"' EXIT
 
-          retry() {
-            local attempt=1
-            local max_attempts=5
-            until "$@"; do
-              if [ "$attempt" -ge "$max_attempts" ]; then
-                echo "command failed after ${attempt} attempts: $*" >&2
-                return 1
-              fi
-              sleep_seconds=$((attempt * 5))
-              echo "retry ${attempt}/${max_attempts} in ${sleep_seconds}s: $*" >&2
-              sleep "$sleep_seconds"
-              attempt=$((attempt + 1))
-            done
-          }
-
-          if gh release view "$tag" >/dev/null 2>&1; then
-            retry gh release edit "$tag" --prerelease --title "$tag"
-          else
-            if ! retry gh release create "$tag" --verify-tag --prerelease --generate-notes --title "$tag"; then
-              # A transient view failure can race an already-created partial release.
-              retry gh release edit "$tag" --prerelease --title "$tag"
-            fi
-          fi
-
-          # Publish small assets first so a large portable retry never leaves the
-          # whole release empty. Each asset is independently resumable/clobberable.
-          files=(
-            ARC-Chat-macOS.zip
-            ARC-Chat-macOS.zip.sha256
-            ARC-Chat-source.zip
-            ARC-Chat-source.zip.sha256
-            ARC-Chat-Linux.zip
-            ARC-Chat-Linux.zip.sha256
-            ARC-Chat-macOS-Portable.zip.sha256
-            ARC-Chat-Windows-Portable.zip.sha256
-            ARC-Chat-macOS-Portable.zip
-            ARC-Chat-Windows-Portable.zip
-          )
-
-          for file in "${files[@]}"; do
-            echo "Publishing $file"
-            retry gh release upload "$tag" "release/$file" --clobber
+          for file in \
+            ARC-Chat-macOS.zip \
+            ARC-Chat-macOS.zip.sha256 \
+            ARC-Chat-source.zip \
+            ARC-Chat-source.zip.sha256 \
+            ARC-Chat-Windows.zip \
+            ARC-Chat-Windows.zip.sha256 \
+            ARC-Chat-Linux.zip \
+            ARC-Chat-Linux.zip.sha256; do
+            cp "release/$file" "$stage/$file"
           done
 
-          # Verify the user-facing public download routes without downloading the
-          # large payload bodies.
-          for file in "${files[@]}"; do
-            url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/${file}"
+          cat > "$stage/README.md" <<EOF
+          # ARC Chat ${GITHUB_REF_NAME} downloads
+
+          These files are the API-free distribution mirror for ARC Chat ${GITHUB_REF_NAME}.
+          They were built by GitHub Actions from commit ${GITHUB_SHA} after the release test gates passed.
+
+          - ARC-Chat-Windows.zip - Windows bootstrap
+          - ARC-Chat-macOS.zip - macOS bootstrap app
+          - ARC-Chat-Linux.zip - Linux bootstrap
+          - ARC-Chat-source.zip - source archive
+
+          The bootstrap packages require internet access on first launch and install their runtime dependencies/Chromium locally.
+          The much larger self-contained Windows/macOS bundles are retained as CI artifacts rather than normal Git objects.
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan "$ASSET_BRANCH"
+          git rm -rf .
+          cp -a "$stage"/. .
+          git add README.md ARC-Chat-*.zip ARC-Chat-*.zip.sha256
+          git commit -m "Publish ${GITHUB_REF_NAME} bootstrap downloads"
+          git push --force origin "HEAD:refs/heads/$ASSET_BRANCH"
+
+      - name: Verify API-free public downloads
+        shell: bash
+        env:
+          ASSET_BRANCH: release-assets-${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          for file in \
+            ARC-Chat-macOS.zip \
+            ARC-Chat-macOS.zip.sha256 \
+            ARC-Chat-source.zip \
+            ARC-Chat-source.zip.sha256 \
+            ARC-Chat-Windows.zip \
+            ARC-Chat-Windows.zip.sha256 \
+            ARC-Chat-Linux.zip \
+            ARC-Chat-Linux.zip.sha256; do
+            url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${ASSET_BRANCH}/${file}"
             echo "Verifying $url"
             curl --fail --silent --show-error --location --head \
               --retry 5 --retry-all-errors --retry-delay 3 "$url" >/dev/null

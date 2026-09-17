@@ -22,6 +22,7 @@ v0.3.0 is the first ARC Chat preview that treats the prototype as a small resear
 - Runtime, build, and integration-test dependencies are pinned for reproducible preview builds.
 - Windows and macOS self-contained packages bundle the compatible headful Chromium runtime used for visible VT authentication. Linux remains a bootstrap/advanced path in this preview.
 - Lightweight Windows/Linux bootstrap bundles and the macOS bootstrap explicitly include every runtime module introduced in v0.3.0.
+- Classroom-sized Windows/macOS/Linux bootstrap downloads and the source archive are mirrored on the `release-assets-v0.3.0` Git branch with SHA-256 sidecars. This path uses ordinary Git transport and remains independent of GitHub Release asset-upload availability; the larger self-contained packages remain CI artifacts because they exceed GitHub's normal Git object limit.
 - Release/CI checks cover Python 3.10, 3.12, and 3.14 across Windows, macOS, and Ubuntu, plus local Jupyter integration and package-content/smoke gates where applicable.
 
 ## Validation completed before release
