@@ -38,18 +38,14 @@ def browser_root() -> Path:
     return root
 
 
-def browser_data_args(root: Path) -> list[str]:
+def selected_browser_components(root: Path) -> list[Path]:
     selected = [
         child for child in root.iterdir()
         if child.name.startswith("chromium-") or child.name.startswith("ffmpeg-")
     ]
     if not any(child.name.startswith("chromium-") for child in selected):
         raise RuntimeError(f"No headful Chromium runtime found under {root}")
-    args: list[str] = []
-    destination = "playwright/driver/package/.local-browsers"
-    for child in sorted(selected):
-        args.append(f"--add-data={child}:{destination}/{child.name}")
-    return args
+    return sorted(selected)
 
 
 def archive_name() -> str:
@@ -84,6 +80,22 @@ def clean_previous_package() -> None:
             ) from exc
 
 
+def copy_browser_runtime(root: Path, package: Path) -> Path:
+    if platform.system() == "Darwin":
+        destination = package / "Contents" / "Resources" / "playwright-browsers"
+    else:
+        destination = package / "playwright-browsers"
+    destination.mkdir(parents=True, exist_ok=True)
+    for component in selected_browser_components(root):
+        shutil.copytree(
+            component,
+            destination / component.name,
+            symlinks=True,
+            dirs_exist_ok=True,
+        )
+    return destination
+
+
 def build() -> tuple[Path, Path, Path]:
     root = browser_root()
     DIST.mkdir(parents=True, exist_ok=True)
@@ -100,7 +112,6 @@ def build() -> tuple[Path, Path, Path]:
         f"--distpath={DIST}",
         f"--workpath={ROOT / 'build' / 'portable'}",
         f"--specpath={ROOT / 'build' / 'portable-spec'}",
-        *browser_data_args(root),
     ]
     if platform.system() in {"Windows", "Darwin"}:
         args.append("--windowed")
@@ -111,6 +122,16 @@ def build() -> tuple[Path, Path, Path]:
         package = DIST / "ARC-Chat.app"
     if not package.exists():
         raise RuntimeError(f"PyInstaller did not create the expected package: {package}")
+
+    copy_browser_runtime(root, package)
+    if platform.system() == "Darwin":
+        # PyInstaller cannot safely process Playwright's nested Chromium.app as
+        # individual collected binaries. Copy the complete browser bundle after
+        # freezing ARC Chat, then sign the complete nested bundle in one pass.
+        subprocess.run(
+            ["codesign", "--force", "--deep", "--sign", "-", str(package)],
+            check=True,
+        )
 
     archive_base = DIST / archive_name()
     archive = archive_base.with_suffix(".zip")

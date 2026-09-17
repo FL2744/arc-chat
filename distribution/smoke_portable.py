@@ -34,7 +34,7 @@ def executable(package: Path) -> Path:
 
 
 def assert_browser_is_bundled(package: Path) -> None:
-    roots = list(package.rglob(".local-browsers"))
+    roots = list(package.rglob("playwright-browsers"))
     if not roots:
         raise RuntimeError("Packaged Playwright browser directory is missing")
     chromium = [p for root in roots for p in root.iterdir() if p.name.startswith("chromium-")]
