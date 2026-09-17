@@ -36,23 +36,23 @@ The helper opens the HTML interface at a local address with a random access toke
 7. Use **Files & results** to upload individual local files and download outputs. Uploaded files receive unique names; use the reported path. Upload complete project folders through Jupyter to preserve filenames and relative imports. Refresh files to see generated `.xlsx` and `.html` outputs. Export dialogue separately if needed.
 8. **Shut down chat kernel** when finished. Also stop the OOD job under **My Interactive Sessions** to release its allocation. Closing the HTML does not stop a running cell or the allocation.
 
-## SUGAR
+## Run an existing notebook
 
-Upload your complete `SUGAR-OOD` folder through Jupyter first. Ask the chatbot to inspect `SUGAR-OOD/SUGAR.ipynb`, report dependencies, and propose executing its cells. For a trusted notebook, you can also run this directly in the Python panel:
+Upload your project folder through Jupyter first. Ask the chatbot to inspect `my-project/analysis.ipynb`, report dependencies, and propose executing its cells. For a trusted notebook, you can also run this directly in the Python panel:
 
 ```python
 import os, json
-os.chdir("SUGAR-OOD")  # run once, relative to the kernel's initial directory
-with open("SUGAR.ipynb", encoding="utf-8") as f:
-    sugar = json.load(f)
-for cell in sugar["cells"]:
+os.chdir("my-project")  # run once, relative to the kernel's initial directory
+with open("analysis.ipynb", encoding="utf-8") as f:
+    notebook = json.load(f)
+for cell in notebook["cells"]:
     if cell["cell_type"] == "code":
         result = get_ipython().run_cell("".join(cell["source"]))
         if result.error_before_exec or result.error_in_exec:
             break
 ```
 
-This runs notebook source within the chat kernel and supports interactive prompts. The original SUGAR notebook is not overwritten. The wrapper cell and outputs are saved in the chat notebook. SUGAR's dependencies, source files, and personal API credentials are not bundled. The actual SUGAR workflow has not been tested without those files and ARC access.
+This runs notebook source within the chat kernel and supports interactive prompts. The original notebook is not overwritten. The wrapper cell and outputs are saved in the chat notebook. Project dependencies, source files, and personal API credentials must be supplied separately.
 
 ## Boundaries and recovery
 
@@ -72,7 +72,7 @@ This runs notebook source within the chat kernel and supports interactive prompt
 .venv/bin/python -m unittest discover -s . -p 'test_*.py' -v
 ```
 
-Unit tests cover proxy URL derivation, binary framing, parent-message correlation, completion ordering, model/tool roundtrips with a mock API, tool rejection, and localhost/token/origin enforcement. A passing local integration test also verified browser-cookie authentication through a Jupyter URL prefix, real kernel execution, persistent variables, interactive stdin, errors, HTML output, valid notebook persistence, uploads, browser UI execution, and shutdown. A live ARC login, model request, and SUGAR run remain to be validated by an authorized user.
+Unit tests cover proxy URL derivation, binary framing, parent-message correlation, completion ordering, model/tool roundtrips with a mock API, tool rejection, and localhost/token/origin enforcement. A passing local integration test also verified browser-cookie authentication through a Jupyter URL prefix, real kernel execution, persistent variables, interactive stdin, errors, HTML output, valid notebook persistence, uploads, browser UI execution, and shutdown. Live ARC login and model requests require validation by an authorized user.
 
 Sources: [ARC OOD](https://www.docs.arc.vt.edu/resources/ood.html), [ARC model API](https://docs.arc.vt.edu/ai/011_llm_api_arc_vt_edu.html), [Jupyter REST](https://jupyter-server.readthedocs.io/en/latest/developers/rest-api.html), [Jupyter messages](https://jupyter-client.readthedocs.io/en/stable/messaging.html), [Playwright authentication](https://playwright.dev/python/docs/auth), [OpenAI chat API](https://developers.openai.com/api/reference/resources/chat).
 
