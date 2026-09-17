@@ -15,10 +15,11 @@ from workspace import JupyterWorkspace
 ROOT = Path(__file__).parent
 TOKEN = secrets.token_urlsafe(32)
 PORT = 8765
-BUILD = '2026.09.17.6'
+BUILD = '2026.09.17.8'
 PROTOCOL_VERSION = 1
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_PATH_CHARS = 4096
+MAX_UPLOAD_NAME_CHARS = 255
 
 def base_url(url):
     p = urlsplit(url)
@@ -79,6 +80,18 @@ def validated_upload(content):
     if len(raw) > MAX_UPLOAD_BYTES:
         raise ValueError('Files larger than 20 MB must be uploaded through Jupyter.')
     return raw
+
+def validated_upload_name(name):
+    """Validate a single remote filename before composing an upload path."""
+    if not isinstance(name, str) or not name:
+        raise ValueError('Invalid filename.')
+    if len(name) > MAX_UPLOAD_NAME_CHARS:
+        raise ValueError('Invalid filename.')
+    if name in ('.', '..') or '/' in name or '\\' in name:
+        raise ValueError('Invalid filename.')
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
+        raise ValueError('Invalid filename.')
+    return name
 
 class Bridge:
     def __init__(self):
@@ -153,8 +166,18 @@ class Bridge:
         return quote(remote_path(path), safe='/')
 
     async def emit(self, event_type, **data):
+        stale = []
+        payload = dict(type=event_type, **data)
         for ws in list(self.clients):
-            if not ws.closed: await ws.send_json(dict(type=event_type, **data))
+            if ws.closed:
+                stale.append(ws)
+                continue
+            try:
+                await ws.send_json(payload)
+            except (ConnectionError, OSError, RuntimeError):
+                stale.append(ws)
+        for ws in stale:
+            self.clients.discard(ws)
 
     async def browser_open(self):
         if not self.context:
@@ -553,8 +576,7 @@ class Bridge:
             listing=await self.api('GET','api/contents/'+quote(path,safe='/'))
             await self.emit('files',items=listing['content']); return 'Files refreshed.'
         if action=='upload':
-            name=d['name']
-            if '/' in name or '\\' in name or name in ('.','..'): raise ValueError('Invalid filename.')
+            name=validated_upload_name(d.get('name'))
             content=d.get('content','')
             validated_upload(content)
             dest='upload-'+uuid.uuid4().hex[:6]+'-'+name
@@ -626,9 +648,18 @@ async def socket(request):
                 d=json.loads(packet.data)
                 if d['action']=='input':
                     if not bridge.input_header: raise ValueError('No input prompt is waiting.')
-                    await bridge.channel.send_json(message('input_reply',{'value':d['value']},'stdin',bridge.input_header))
+                    # Claim the prompt before awaiting network I/O so two open
+                    # browser tabs cannot submit the same stdin response twice.
+                    input_header=bridge.input_header
+                    input_content=bridge.input_content
                     bridge.input_header=None
                     bridge.input_content=None
+                    try:
+                        await bridge.channel.send_json(message('input_reply',{'value':d['value']},'stdin',input_header))
+                    except Exception:
+                        bridge.input_header=input_header
+                        bridge.input_content=input_content
+                        raise
                     await bridge.emit('input_done')
                     await bridge.set_state(AppState.EXECUTING, 'Python input submitted.', force=True)
                 elif d['action']=='interrupt':
@@ -639,7 +670,10 @@ async def socket(request):
                     bridge.busy=True
                     task=asyncio.create_task(work(d)); tasks.add(task); task.add_done_callback(tasks.discard)
             except Exception as e:
-                await bridge.set_state(AppState.ERROR, str(e), force=True)
+                # A malformed/duplicate UI packet is a client-side action error,
+                # not evidence that the ARC/Jupyter session itself became bad.
+                # Preserve the current recoverable state so a human double-click
+                # or stale browser event cannot poison an otherwise healthy app.
                 await bridge.emit('error',text=str(e).replace(bridge.key,'[redacted]') if bridge.key else str(e))
     finally:
         bridge.clients.discard(ws)

@@ -106,7 +106,7 @@ Automatic attachment tracks the tab opened by Connect ready session (including p
 
 The helper continuously reads kernel WebSocket messages between code runs to maintain ping/pong. If the connection closes while idle, new execution reconnects to the same existing kernel without clearing variables or history. Busy kernels are preserved and require waiting or interruption; code is never automatically replayed after a mid-execution disconnect.
 
-Recovery from an OOD 502/503/504: check My Interactive Sessions for a reachable running Jupyter job. Connect ready session can switch from a stale server to the newly opened server without deleting the old kernel or files. Disconnect old session clears only local connection references when needed. Switching servers creates a fresh Python workspace; saved files remain on their original filesystem, but in-memory variables are not transferred. Updating the files does not hot-reload a running helper: quit the helper and reopen the app to use build 2026.09.17.6.
+Recovery from an OOD 502/503/504: check My Interactive Sessions for a reachable running Jupyter job. Connect ready session can switch from a stale server to the newly opened server without deleting the old kernel or files. Disconnect old session clears only local connection references when needed. Switching servers creates a fresh Python workspace; saved files remain on their original filesystem, but in-memory variables are not transferred. Updating the files does not hot-reload a running helper: quit the helper and reopen the app to use build 2026.09.17.8.
 
 ## Certificate verification on macOS
 

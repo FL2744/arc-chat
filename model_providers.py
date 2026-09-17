@@ -10,7 +10,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
-from aiohttp import ClientTimeout
+from aiohttp import ClientConnectionError, ClientTimeout
 
 
 ARC_ENDPOINT = "https://llm-api.arc.vt.edu/api/v1"
@@ -26,6 +26,12 @@ class EndpointPolicy:
             raise ValueError("Model API URL must use HTTPS.")
         if not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("Model API URL must contain a public HTTPS host without embedded credentials.")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("Model API URL contains an invalid port.") from exc
+        if port == 0:
+            raise ValueError("Model API URL contains an invalid port.")
         host = parsed.hostname.lower().rstrip(".")
         if parsed.query or parsed.fragment:
             raise ValueError("Model API URL must not contain a query string or fragment.")
@@ -114,7 +120,7 @@ class OpenAICompatibleProvider:
                     delay = min(30.0, delay * 2)
             except RuntimeError:
                 raise
-            except (OSError, asyncio.TimeoutError) as exc:
+            except (ClientConnectionError, OSError, asyncio.TimeoutError) as exc:
                 last_error = exc
                 if attempt + 1 >= self.max_attempts:
                     raise RuntimeError("Model API is temporarily unreachable after bounded retries.") from exc
