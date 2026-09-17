@@ -16,6 +16,7 @@ from typing import Any, Mapping
 
 
 PROFILE_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+PROFILE_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,7 @@ class CourseProfile:
             raise ValueError("Course profile name cannot be empty.")
         if self.workspace_backend not in {"arc_jupyter", "local"}:
             raise ValueError(f"Unsupported workspace backend: {self.workspace_backend}")
-        if self.model_provider not in {"arc_shared", "openai", "custom"}:
+        if self.model_provider not in {"arc_shared", "arc_dedicated", "openai", "custom"}:
             raise ValueError(f"Unsupported model provider: {self.model_provider}")
         if any(not isinstance(model, str) or not model.strip() for model in self.allowed_models):
             raise ValueError("allowed_models must contain non-empty model IDs.")
@@ -65,8 +66,8 @@ class CourseProfile:
     def allowed_provider_names(self, advanced: bool) -> set[str]:
         """Return protocol provider names permitted by this profile."""
         if advanced and self.model_policy == "user_selected":
-            return {"arc", "openai", "custom", "managed"}
-        provider = {"arc_shared": "arc", "openai": "openai", "custom": "custom"}[self.model_provider]
+            return {"arc", "arc_dedicated", "openai", "custom", "managed"}
+        provider = {"arc_shared": "arc", "arc_dedicated": "arc_dedicated", "openai": "openai", "custom": "custom"}[self.model_provider]
         return {provider}
 
     def allows_model(self, provider: str, model: str, advanced: bool) -> bool:
@@ -119,7 +120,14 @@ def load_profiles(path: str | os.PathLike[str] | None = None) -> dict[str, Cours
     profile_path = Path(selected_path).expanduser()
     with profile_path.open(encoding="utf-8") as stream:
         raw = json.load(stream)
-    values = raw.get("profiles", raw) if isinstance(raw, Mapping) else raw
+    if isinstance(raw, Mapping) and "profiles" in raw:
+        version = raw.get("version", PROFILE_SCHEMA_VERSION)
+        if version != PROFILE_SCHEMA_VERSION:
+            raise ValueError(f"Unsupported course profile schema version {version!r}; expected {PROFILE_SCHEMA_VERSION}.")
+        values = raw["profiles"]
+    else:
+        # Keep the original list-only form readable for older local configs.
+        values = raw
     if not isinstance(values, list):
         raise ValueError("Course profile configuration must contain a profiles list.")
     for item in values:

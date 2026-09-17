@@ -6,7 +6,8 @@ import asyncio
 import re
 import secrets
 import shutil
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from typing import Any
 
 from jobs import JobSpec, SlurmBackend, NODE_RE
 
@@ -15,6 +16,72 @@ MODEL_PATH_RE = re.compile(r"^/common/data/models/[A-Za-z0-9_.+/-]{1,300}$")
 MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:/+-]{1,160}$")
 PARSER_RE = re.compile(r"^[A-Za-z0-9_.-]{0,64}$")
 API_KEY_RE = re.compile(r"^[A-Za-z0-9_.~+/=-]{16,256}$")
+
+
+@dataclass(frozen=True)
+class EndpointRecord:
+    id: str
+    provider: str
+    model: str
+    endpoint: str
+    reachability: str
+    state: str = "available"
+    job_id: str = ""
+    metadata: dict[str, Any] | None = None
+
+    def public_dict(self) -> dict[str, Any]:
+        value = asdict(self)
+        value["metadata"] = dict(self.metadata or {})
+        return value
+
+
+class EndpointRegistry:
+    """In-memory, non-secret registry of model/service endpoints."""
+
+    def __init__(self):
+        self._items: dict[str, EndpointRecord] = {}
+
+    def upsert(
+        self,
+        *,
+        provider: str,
+        model: str,
+        endpoint: str,
+        reachability: str,
+        state: str = "available",
+        job_id: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> EndpointRecord:
+        if not re.fullmatch(r"[a-z_]{2,40}", provider or ""):
+            raise ValueError("Invalid endpoint provider id.")
+        if reachability not in {"direct", "arc_session", "loopback_tunnel"}:
+            raise ValueError("Invalid endpoint reachability.")
+        if not MODEL_NAME_RE.fullmatch(model or ""):
+            raise ValueError("Invalid endpoint model id.")
+        if not isinstance(endpoint, str) or not endpoint or len(endpoint) > 1000:
+            raise ValueError("Invalid endpoint URL.")
+        identity = f"{provider}:{model}:{job_id or endpoint}"
+        record_id = "endpoint-" + __import__("hashlib").sha256(identity.encode("utf-8")).hexdigest()[:20]
+        record = EndpointRecord(
+            id=record_id,
+            provider=provider,
+            model=model,
+            endpoint=endpoint,
+            reachability=reachability,
+            state=str(state)[:64],
+            job_id=str(job_id)[:20],
+            metadata=dict(metadata or {}),
+        )
+        self._items[record_id] = record
+        return record
+
+    def list(self) -> list[EndpointRecord]:
+        return list(self._items.values())
+
+    def remove_job(self, job_id: str) -> None:
+        for key, item in list(self._items.items()):
+            if item.job_id == str(job_id):
+                del self._items[key]
 
 
 @dataclass(frozen=True)
@@ -29,6 +96,7 @@ class VllmServiceSpec:
     walltime: str = "1-00:00:00"
     partition: str = "l40s_normal_q"
     gpu_type: str = "l40s"
+    qos: str = "fal_l40s_normal_base"
     tool_call_parser: str = "openai"
     reasoning_parser: str = ""
     api_key: str = ""
@@ -78,6 +146,7 @@ class VllmServiceSpec:
             cpus_per_task=self.cpus,
             gpus=self.gpus,
             gpu_type=self.gpu_type,
+            qos=self.qos,
             output=f"vllm-{self.served_model_name.replace('/', '-') }-%j.log",
             name="arc-chat-vllm",
         )
@@ -106,8 +175,8 @@ class VllmServiceManager:
     def __init__(self, jobs: SlurmBackend):
         self.jobs = jobs
 
-    async def start(self, spec: VllmServiceSpec) -> ManagedService:
-        key = spec.resolved_api_key()
+    async def start(self, spec: VllmServiceSpec, *, api_key: str | None = None) -> ManagedService:
+        key = api_key or spec.resolved_api_key()
         job_id = await self.jobs.submit(spec.job_spec(api_key=key))
         return ManagedService(job_id=job_id, api_key=key, model=spec.served_model_name, port=spec.port)
 

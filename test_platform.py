@@ -6,11 +6,11 @@ from artifacts import ArtifactStore, PipelineGraph, PipelineStep, safe_workspace
 from config import get_profile
 from context_window import bounded_history, estimate_tokens, truncate_text
 from helper import Bridge
-from jobs import JobSpec, SlurmBackend, SshCommandGateway
-from model_providers import ModelCatalog
+from jobs import JobHistory, JobSpec, RESOURCE_PROFILES, SlurmBackend, SshCommandGateway, get_resource_profile
+from model_providers import ArcDedicatedModelProvider, EndpointPolicy, ModelCatalog, build_provider
 from protocol import CommandEnvelope, ReplayCache
 from security import redact_structure, redact_text
-from services import SshTunnel, VllmServiceSpec
+from services import EndpointRegistry, SshTunnel, VllmServiceSpec
 
 
 class ProtocolTests(unittest.TestCase):
@@ -51,6 +51,27 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(nested["x"][0], "[redacted]")
 
 
+class DedicatedArcProviderTests(unittest.TestCase):
+    def test_dedicated_provider_accepts_only_arc_https_hosts(self):
+        endpoint = EndpointPolicy.validate_arc_dedicated("https://ood.arc.vt.edu/node/fal001/session/api/v1")
+        self.assertEqual(endpoint, "https://ood.arc.vt.edu/node/fal001/session/api/v1")
+        endpoint = EndpointPolicy.validate_arc_dedicated("https://fal001.arc.vt.edu:8443/v1")
+        self.assertEqual(endpoint, "https://fal001.arc.vt.edu:8443/v1")
+        for invalid in (
+            "http://ood.arc.vt.edu/v1",
+            "https://arc.vt.edu.evil.example/v1",
+            "https://example.org/v1",
+            "https://127.0.0.1/v1",
+        ):
+            with self.assertRaises(ValueError):
+                EndpointPolicy.validate_arc_dedicated(invalid)
+
+    def test_build_provider_has_first_class_arc_dedicated_type(self):
+        provider = build_provider(object(), "arc_dedicated", "https://ood.arc.vt.edu/session/v1", "session-key")
+        self.assertIsInstance(provider, ArcDedicatedModelProvider)
+        self.assertEqual(provider.endpoint, "https://ood.arc.vt.edu/session/v1")
+
+
 class ContextWindowTests(unittest.TestCase):
     def test_large_output_is_clipped_and_recent_history_survives(self):
         clipped = truncate_text("x" * 100_000, 4000)
@@ -89,6 +110,17 @@ class ArtifactTests(unittest.TestCase):
             safe_workspace_path("../secret")
         with self.assertRaises(ValueError):
             PipelineGraph([PipelineStep("x", "python", inputs=("missing",))])
+        with self.assertRaises(ValueError):
+            PipelineGraph([
+                PipelineStep("a", "python", inputs=("b",)),
+                PipelineStep("b", "python", inputs=("a",)),
+            ])
+
+    def test_artifact_records_round_trip_without_contents(self):
+        store = ArtifactStore()
+        record = store.register("jobs/5123/stdout.txt", workspace="slurm", created_by="slurm-job:5123", metadata={"job_id":"5123"})
+        restored = ArtifactStore.from_records(store.export_records())
+        self.assertEqual(restored.get(record.id).metadata["job_id"], "5123")
 
 
 class JobSpecTests(unittest.TestCase):
@@ -115,6 +147,33 @@ class JobSpecTests(unittest.TestCase):
         self.assertEqual(gateway.host, "falcon2.arc.vt.edu")
         with self.assertRaises(ValueError):
             SshCommandGateway("student", "evil.example")
+
+    def test_resource_profiles_match_documented_falcon_partitions(self):
+        expected = {
+            "falcon-l40s-small": ("l40s_normal_q", "fal_l40s_normal_base", "l40s"),
+            "falcon-a30-small": ("a30_normal_q", "fal_a30_normal_base", "a30"),
+            "falcon-v100-small": ("v100_normal_q", "fal_v100_normal_base", "v100"),
+            "falcon-t4-small": ("t4_normal_q", "fal_t4_normal_base", "t4"),
+        }
+        for profile_id, values in expected.items():
+            profile = get_resource_profile(profile_id)
+            self.assertEqual((profile.partition, profile.qos, profile.gpu_type), values)
+            self.assertGreater(profile.gpus, 0)
+        self.assertNotIn("falcon-cpu-small", RESOURCE_PROFILES)
+
+    def test_job_history_persists_only_hashed_command_and_resource_metadata(self):
+        history = JobHistory()
+        spec = JobSpec(account="alloc", command="python secret_analysis.py --token dont-persist-me", gpus=1)
+        record = history.record_submission("5123", spec)
+        rendered = str(history.export_records())
+        self.assertNotIn("dont-persist-me", rendered)
+        self.assertNotIn("secret_analysis.py", rendered)
+        self.assertEqual(len(record.command_sha256), 64)
+        history.update("5123", state="RUNNING", node="fal036")
+        history.link_artifact("5123", "artifact-0123456789abcdef")
+        restored = JobHistory.from_records(history.export_records())
+        self.assertEqual(restored.list()[0].node, "fal036")
+        self.assertEqual(restored.list()[0].artifact_ids, ["artifact-0123456789abcdef"])
 
 
 class FakeGateway:
@@ -159,6 +218,7 @@ class VllmTests(unittest.TestCase):
         key = "0123456789abcdef0123456789abcdef"
         script = spec.job_spec(api_key=key).script()
         self.assertIn("module load vLLM", script)
+        self.assertIn("#SBATCH --qos=fal_l40s_normal_base", script)
         self.assertIn("/common/data/models/openai--gpt-oss-120b", script)
         self.assertIn("--tensor-parallel-size", script)
         self.assertIn("--tool-call-parser", script)
@@ -172,6 +232,23 @@ class VllmTests(unittest.TestCase):
         command = " ".join(tunnel.argv())
         self.assertIn("8000:fal036:8000", command)
         self.assertIn("student@falcon2.arc.vt.edu", command)
+
+    def test_endpoint_registry_is_non_secret_and_tracks_reachability(self):
+        registry = EndpointRegistry()
+        record = registry.upsert(
+            provider="managed",
+            model="gpt-oss-120b",
+            endpoint="http://127.0.0.1:8000/v1",
+            reachability="loopback_tunnel",
+            job_id="5123",
+            metadata={"remote_node": "fal036", "remote_port": 8000},
+        )
+        self.assertEqual(record.reachability, "loopback_tunnel")
+        self.assertNotIn("key", str(record.public_dict()).lower())
+        registry.remove_job("5123")
+        self.assertEqual(registry.list(), [])
+        with self.assertRaises(ValueError):
+            registry.upsert(provider="managed", model="gpt", endpoint="http://127.0.0.1/v1", reachability="public")
 
 
 class ManagedProviderTests(unittest.IsolatedAsyncioTestCase):

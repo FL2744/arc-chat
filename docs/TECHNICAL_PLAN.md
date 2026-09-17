@@ -49,7 +49,16 @@ The existing helper provides:
 - explicit review before model-proposed Python executes;
 - no unattended agent execution loop;
 - basic recovery from stale OOD/Jupyter connections;
-- mock/unit tests and a local Jupyter integration test.
+- explicit application state, structured recovery errors, request idempotency, and bounded reconnect replay protection;
+- non-secret restart recovery for Jupyter/job/artifact metadata;
+- dynamic/fallback model catalog support with endpoint policy separation;
+- Advanced Mode Slurm submit/status/log/cancel through the documented Falcon SSH path;
+- documented Falcon resource profiles and durable non-secret job provenance;
+- dedicated ARC OOD LLM and managed-vLLM provider paths;
+- artifact/provenance and pipeline graph contracts;
+- token-protected loopback `/api/v1` read/proposal integration contract;
+- diagnostics export, cross-platform packaging CI, and human-stress coverage;
+- mock/unit tests and a local real Jupyter/browser integration test.
 
 These are valuable primitives and should be retained.
 
@@ -57,7 +66,7 @@ These are valuable primitives and should be retained.
 
 The prototype concentrates too many responsibilities in `Bridge` and exposes too much infrastructure directly in the UI.
 
-`Bridge` currently owns browser lifecycle, ARC authentication state, OOD navigation, Jupyter REST/WebSocket transport, kernel lifecycle, notebook persistence, model calls, chat history, file transfer, execution approval state, and application event delivery. This makes behavior hard to test independently and makes future Slurm/vLLM features risky to add.
+`Bridge` remains the orchestration/lifecycle coordinator, but state, configuration, model transports, OOD automation, workspace execution, diagnostics, Slurm jobs, vLLM services, artifacts, protocol validation, security/redaction, context management, and external integration contracts now have separate modules/interfaces. Continued decomposition is still useful, but Slurm/vLLM no longer need to be embedded as ad-hoc UI behavior.
 
 The HTML currently asks the user to understand or manipulate concepts such as:
 
@@ -76,13 +85,12 @@ Those are appropriate diagnostics or Advanced Mode controls, but they are too mu
 
 Other immediate concerns:
 
-- a professor-specific allocation is currently prefilled and should not be a public default;
-- model IDs are hard-coded even though ARC changes the hosted catalog over time;
-- custom HTTPS endpoints are accepted with little policy separation between ordinary and expert use;
-- local session state is largely in-memory, so helper restart recovery is limited;
-- macOS still depends on a local Python installation and first-run dependency/browser downloads;
-- Windows has no first-class packaged launcher yet;
-- classroom support at the scale of hundreds of students requires diagnostics, backpressure handling, and deployment testing beyond the current prototype.
+- published lightweight bootstrap packages still require Python 3.10+ and first-run dependency/browser downloads; self-contained Windows/macOS packages are built/smoke-tested in CI but are too large for normal Git object distribution;
+- preview macOS packages use ad-hoc signing and are not institutionally notarized;
+- the documented ARC SSH/Slurm/dedicated-LLM/vLLM implementations still need credentialed live confirmation before being labeled institutionally supported;
+- clean-machine/course-scale first-run and burst-capacity validation remain deployment work rather than missing application architecture;
+- pipeline execution remains a reviewed contract/proposal layer rather than a general autonomous workflow engine;
+- formal copyright/licensing ownership and institutional support ownership remain unresolved stakeholder decisions.
 
 ---
 
@@ -96,8 +104,8 @@ Other immediate concerns:
 4. **Authentication remains visible and respects VT MFA/VPN requirements.**
 5. **The application can recover from common network, OOD, and Jupyter failures without replaying code.**
 6. **The same backend can power both Student and Advanced modes.**
-7. **Advanced Mode can eventually submit/manage Slurm jobs and launch dedicated model services, including vLLM.**
-8. **External research applications can eventually consume workspace, model, job, and artifact services through stable interfaces.**
+7. **Advanced Mode can submit/manage reviewed Slurm jobs and manage dedicated model services, including documented vLLM workflows.**
+8. **External research applications can consume non-secret state/job/artifact metadata and request reviewed handoffs through versioned stable interfaces.**
 9. **Classroom releases are reproducible, self-contained, diagnosable, and supportable at course scale.**
 10. **The design is general enough for use outside FL 2744 without making the first classroom deployment wait for every advanced feature.**
 
@@ -482,7 +490,7 @@ Reference: https://docs.arc.vt.edu/ai/020_ood_arc_vt_edu.html
 
 #### C. Custom vLLM service
 
-Advanced Mode should eventually launch and manage user-controlled vLLM instances through Slurm. ARC documents use of `/common/data/models/` and custom Slurm scripts for serving.
+Advanced Mode now launches and manages reviewed user-controlled vLLM instances through the Slurm job layer using ARC's documented `/common/data/models/` storage and vLLM/Slurm workflow. The preview implementation keeps the service private to ARC plus a user-started loopback SSH tunnel; credentialed live confirmation remains a support/validation step rather than a missing architecture step.
 
 Reference: https://docs.arc.vt.edu/ai/030_vllm.html
 
@@ -830,9 +838,8 @@ The classroom version should not require students to install Python, create a vi
 
 - Windows 11 x64 (Windows 10 if practical and tested)
 - macOS 13+ Apple Silicon
-- macOS 13+ Intel while there is meaningful demand
 
-Linux can remain an advanced/manual path initially.
+Intel macOS is not an initial target. Linux can remain an advanced/manual path initially.
 
 ### 18.2 Packaging goals
 
@@ -848,7 +855,6 @@ Release automation should build cleanly on CI runners and produce:
 
 - Windows portable package and/or installer;
 - macOS Apple Silicon package;
-- macOS Intel package;
 - checksums;
 - version metadata;
 - smoke-test results.
@@ -1061,6 +1067,23 @@ These should be tracked as explicit deployment requirements rather than discover
 
 ## 23. Implementation roadmap
 
+### Implementation status — 2026-09-17
+
+This roadmap began as a forward plan. It is now also a status record. The status below supersedes older future-tense wording in the phase descriptions while preserving the original goals/rationale.
+
+| Phase | Status | Implemented locally/from ARC documentation | Remaining dependency |
+| --- | --- | --- | --- |
+| 0 — preserve/measure | **Implemented** | known-good releases, expanded tests, version/build IDs, state/network boundaries, no personal allocation default, structured errors | none material |
+| 1 — Student Mode | **Implemented technically** | state machine, workspace/provider/OOD interfaces, course profiles, Student/Advanced UI, one Start Workspace path, Doctor/recovery | credentialed first-use confirmation of the complete ARC path |
+| 2 — classroom distribution | **Implemented technically; deployment validation remains** | Windows/macOS self-contained CI builds, bootstrap downloads, bundled Chromium portable builds, release CI, diagnostics, version messaging, retry/backoff | clean-machine success-rate study; managed/notarized institutional distribution |
+| 3 — course pilot | **External validation track** | failure taxonomy/recovery paths and course-oriented UI already inform implementation | actual classroom usability/capacity/support observations; not a blocker for further engineering |
+| 4 — advanced workspace/jobs | **Implemented from documented ARC contracts** | Advanced Mode, Falcon resource profiles, `JobBackend`, SSH `sbatch`/`squeue`/logs/`scancel`, durable non-secret job history/artifact linkage | credentialed live confirmation and future richer workspace inspector |
+| 5 — dedicated models/vLLM | **Implemented from documented ARC contracts** | dedicated OOD provider, vLLM job spec, shared model paths, Slurm lifecycle, compute-node discovery, loopback SSH tunnel, explicit stop/release | credentialed live confirmation; dedicated OOD launch remains visible/manual because no stable machine launch API is documented |
+| 6 — artifacts/integration | **Substantially implemented** | durable artifact metadata, validated pipeline DAG contract, token-protected `/api/v1`, review-proposal inbox, example external client | richer reviewed pipeline execution/output-to-input UI and real external-product adoption |
+| 7 — institutional hardening | **Mostly implemented locally** | security/data policy, contributor/governance policy, support escalation, versioned profiles, accessibility smoke gate, log retention, release/deprecation policy | stakeholder review, Apple institutional signing/notarization, formal support ownership, copyright/licensing decision |
+
+Engineering should continue from the remaining dependencies above; it should not regress to treating already implemented Slurm/vLLM/integration architecture as hypothetical.
+
 ### Phase 0 — Preserve and measure the prototype
 
 **Goal:** establish a safe refactor baseline.
@@ -1217,7 +1240,7 @@ Deliverables:
 
 ## 24. Recommended first development pass
 
-The first substantial PR after this plan should **not** attempt Slurm or vLLM yet.
+**Historical status:** this first development pass is complete. It is retained to document the sequence that created the current architecture; it is no longer the active scope. Slurm/vLLM work proceeded afterward against official ARC documentation.
 
 Recommended scope:
 
@@ -1232,35 +1255,17 @@ Recommended scope:
 9. Add `Doctor` with local/runtime/model/Jupyter checks.
 10. Expand tests around all extracted interfaces and state transitions.
 
-That PR would create the architecture needed for every later feature while immediately improving the classroom experience.
+That pass created the architecture needed for the later phases while improving the classroom experience.
 
 ---
 
 ## 25. Immediate technical issues to inspect during implementation
 
-The following deserve explicit review as the refactor begins:
+Status of the original inspection list:
 
-- path traversal and remote file-scope assumptions;
-- arbitrary/custom provider SSRF and credential-host binding;
-- complete secret redaction, including multiple simultaneously configured keys;
-- stale Playwright cookies/session lifecycle;
-- OOD selector resilience and manual fallback;
-- multiple Jupyter server disambiguation;
-- model compatibility with tool calling;
-- output/context truncation strategy;
-- context-window accounting;
-- HTML/rich-output sandboxing;
-- notebook/session resume after helper restart;
-- file upload limits and large-project workflow;
-- rate-limit behavior at classroom scale;
-- one-active-client vs multiple-browser-tab behavior;
-- packaging/runtime update failures;
-- dependency pinning and reproducible builds;
-- code signing/notarization;
-- local diagnostic/log retention policy;
-- accessibility/keyboard navigation;
-- handling of ARC outage vs local application failure;
-- course allocation exhaustion and idle resource cleanup.
+- **Implemented/tested:** path traversal/file scope, custom-provider SSRF policy, multi-secret redaction, OOD/manual fallback, multiple-Jupyter disambiguation, model catalog/capability handling, output/context truncation/accounting, rich-output sandboxing, restart resume, upload limits, 429/5xx bounded backoff, multiple-tab/request idempotency, package/runtime CI, direct dependency pinning, local log retention, keyboard/accessibility smoke checks, structured ARC/local error recovery.
+- **Implemented by lifecycle controls:** visible Slurm/vLLM status and explicit cancel/stop paths; OOD allocations remain visibly user-managed and must still be stopped in OOD.
+- **External/institutional:** Apple production signing/notarization, formal course-allocation capacity policy, and credentialed/live ARC confirmation of the documented advanced workflows.
 
 ---
 
@@ -1298,7 +1303,7 @@ The project is succeeding when a student with no prior CS/HPC experience can:
 9. recover from a dropped connection using an obvious action;
 10. finish without learning Slurm or Jupyter administration.
 
-At the same time, an advanced researcher should eventually be able to use the same application to:
+At the same time, the Advanced Mode preview is intended to let a researcher:
 
 1. choose an ARC project/allocation and resource profile;
 2. manage workspaces and files;

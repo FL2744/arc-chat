@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
+import hashlib
 import os
 import re
 import shlex
 import shutil
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
 
@@ -84,10 +86,145 @@ class JobSpec:
         return asdict(self)
 
 
-RESOURCE_PROFILES = {
-    "falcon-l40s-small": dict(partition="l40s_normal_q", cpus_per_task=8, gpus=1, gpu_type="l40s", walltime="01:00:00"),
-    "falcon-l40s-vllm": dict(partition="l40s_normal_q", cpus_per_task=32, gpus=2, gpu_type="l40s", walltime="1-00:00:00"),
+@dataclass(frozen=True)
+class ResourceProfile:
+    id: str
+    label: str
+    partition: str
+    cpus_per_task: int
+    gpus: int = 0
+    gpu_type: str = "l40s"
+    walltime: str = "01:00:00"
+    memory_gb: int | None = None
+    qos: str = ""
+
+    def public_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+RESOURCE_PROFILES: dict[str, ResourceProfile] = {
+    "falcon-l40s-small": ResourceProfile(
+        id="falcon-l40s-small", label="Falcon L40S small", partition="l40s_normal_q",
+        cpus_per_task=8, gpus=1, gpu_type="l40s", walltime="01:00:00", qos="fal_l40s_normal_base",
+    ),
+    "falcon-a30-small": ResourceProfile(
+        id="falcon-a30-small", label="Falcon A30 small", partition="a30_normal_q",
+        cpus_per_task=8, gpus=1, gpu_type="a30", walltime="01:00:00", qos="fal_a30_normal_base",
+    ),
+    "falcon-v100-small": ResourceProfile(
+        id="falcon-v100-small", label="Falcon V100 small", partition="v100_normal_q",
+        cpus_per_task=6, gpus=1, gpu_type="v100", walltime="01:00:00", qos="fal_v100_normal_base",
+    ),
+    "falcon-t4-small": ResourceProfile(
+        id="falcon-t4-small", label="Falcon T4 small", partition="t4_normal_q",
+        cpus_per_task=6, gpus=1, gpu_type="t4", walltime="01:00:00", qos="fal_t4_normal_base",
+    ),
+    "falcon-l40s-vllm": ResourceProfile(
+        id="falcon-l40s-vllm", label="Falcon L40S vLLM", partition="l40s_normal_q",
+        cpus_per_task=32, gpus=2, gpu_type="l40s", walltime="1-00:00:00", qos="fal_l40s_normal_base",
+    ),
 }
+
+
+def get_resource_profile(profile_id: str) -> ResourceProfile:
+    try:
+        return RESOURCE_PROFILES[profile_id]
+    except KeyError as exc:
+        raise ValueError(f"Unknown ARC resource profile: {profile_id}") from exc
+
+
+@dataclass
+class JobRecord:
+    job_id: str
+    kind: str
+    name: str
+    submitted_at: str
+    state: str = "SUBMITTED"
+    node: str = ""
+    reason: str = ""
+    resources: dict[str, Any] = field(default_factory=dict)
+    command_sha256: str = ""
+    artifact_ids: list[str] = field(default_factory=list)
+
+    @classmethod
+    def submitted(cls, job_id: str, spec: JobSpec, *, kind: str = "slurm") -> "JobRecord":
+        _job_id(job_id)
+        public = spec.public_dict()
+        command = str(public.pop("command", ""))
+        return cls(
+            job_id=job_id,
+            kind=kind,
+            name=spec.name,
+            submitted_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+            resources=public,
+            command_sha256=hashlib.sha256(command.encode("utf-8")).hexdigest(),
+        )
+
+    def public_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+class JobHistory:
+    """Bounded non-secret scheduler provenance suitable for local recovery."""
+
+    def __init__(self, records: list[JobRecord] | None = None, *, limit: int = 100):
+        self.limit = max(1, min(1000, int(limit)))
+        self._records: dict[str, JobRecord] = {}
+        for record in records or []:
+            self.add(record)
+
+    def add(self, record: JobRecord) -> JobRecord:
+        _job_id(record.job_id)
+        self._records[record.job_id] = record
+        while len(self._records) > self.limit:
+            self._records.pop(next(iter(self._records)))
+        return record
+
+    def record_submission(self, job_id: str, spec: JobSpec, *, kind: str = "slurm") -> JobRecord:
+        return self.add(JobRecord.submitted(job_id, spec, kind=kind))
+
+    def update(self, job_id: str, *, state: str, node: str = "", reason: str = "") -> JobRecord:
+        job_id = _job_id(job_id)
+        record = self._records.get(job_id)
+        if record is None:
+            record = JobRecord(job_id=job_id, kind="unknown", name="unknown", submitted_at="")
+            self.add(record)
+        record.state = str(state)[:64]
+        record.node = str(node)[:128]
+        record.reason = str(reason)[:500]
+        return record
+
+    def link_artifact(self, job_id: str, artifact_id: str) -> JobRecord:
+        record = self._records.get(_job_id(job_id))
+        if record is None:
+            raise KeyError(f"Unknown job: {job_id}")
+        if artifact_id not in record.artifact_ids:
+            record.artifact_ids.append(artifact_id)
+        return record
+
+    def list(self) -> list[JobRecord]:
+        return list(self._records.values())
+
+    def export_records(self) -> list[dict[str, Any]]:
+        return [record.public_dict() for record in self.list()]
+
+    @classmethod
+    def from_records(cls, values: Any, *, limit: int = 100) -> "JobHistory":
+        records: list[JobRecord] = []
+        if not isinstance(values, list):
+            return cls(limit=limit)
+        allowed = {field.name for field in __import__("dataclasses").fields(JobRecord)}
+        for value in values[-limit:]:
+            if not isinstance(value, dict):
+                continue
+            try:
+                filtered = {key: value[key] for key in allowed if key in value}
+                record = JobRecord(**filtered)
+                _job_id(record.job_id)
+            except (TypeError, ValueError):
+                continue
+            records.append(record)
+        return cls(records, limit=limit)
 
 
 class CommandGateway(Protocol):

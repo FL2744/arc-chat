@@ -33,6 +33,13 @@ class ProfileTests(unittest.TestCase):
             self.assertEqual(profiles["seminar"].workspace_backend, "local")
             self.assertIn("fl2744", profiles)
 
+    def test_profile_schema_version_is_checked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "profiles.json"
+            path.write_text(json.dumps({"version": 999, "profiles": []}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "schema version"):
+                load_profiles(path)
+
 
 class StateTests(unittest.TestCase):
     def test_state_machine_rejects_unplanned_transition(self):

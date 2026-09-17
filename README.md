@@ -48,21 +48,36 @@ Student Mode uses the selected course profile and keeps infrastructure details o
 1. Set `ARC_COURSE_ALLOCATION` when using Student Mode, enable VT VPN if needed, and click **Start course workspace**. Complete VT credentials and MFA in the visible Chromium window.
 2. Review resources and walltime in OOD, then click **Launch** there or **Launch reviewed job** in Advanced Mode. If site labels differ, fill in the form manually. Provisioning is deliberately user-submitted; the helper does not guess resource settings.
 3. Once the job is ready, click **Connect ready session** in the chat (or **Connect to Jupyter** in OOD), then **Attach to Jupyter** in the chat. The helper captures the opened tab and attaches automatically. For a manually opened tab, click Attach automatically; if several distinct servers are open, choose a session button. This creates a new persistent Python kernel and a uniquely named `ARC-chat-….ipynb` notebook in the Jupyter root. Choose an installed kernel name if `python3` is unavailable.
-4. Enter your personal ARC API key. Student Mode uses the Virginia Tech ARC endpoint and the course profile's model policy. OpenAI and custom OpenAI-compatible endpoints remain available in Advanced Mode; all custom endpoints must use HTTPS and may not target local/private addresses. Advanced Mode can also use a reviewed ARC vLLM job through a localhost SSH tunnel; its generated API key stays inside the helper.
+4. Enter the model API key for the selected provider. Student Mode uses the Virginia Tech ARC shared endpoint and the course profile's model policy. Advanced Mode can also use a dedicated ARC Open OnDemand LLM session, a reviewed ARC vLLM job through a localhost SSH tunnel, OpenAI, or a custom OpenAI-compatible endpoint. Dedicated ARC endpoints are restricted to ARC HTTPS hosts; arbitrary custom endpoints must use public HTTPS and may not target local/private addresses. Managed-vLLM keys stay inside the helper.
 5. Send a request, review proposed Python, and click **Run Python**. Outputs appear as they arrive. Click **Continue with outputs** to let the model inspect the results and propose the next step. Each proposed execution requires a click; there is no unattended execution loop.
 6. Reply to Python `input()` and `getpass()` prompts in the input box. Input answers are omitted from chatbot history, but the Python program itself can print or save them. Never put API keys directly into chat or source cells; use `getpass.getpass()`.
 7. Use **Files & results** to upload individual local files and download outputs. Uploaded files receive unique names; use the reported path. Upload complete project folders through Jupyter to preserve filenames and relative imports. Refresh files to see generated `.xlsx` and `.html` outputs. Export dialogue separately if needed.
 8. **Shut down chat kernel** when finished. Also stop the OOD job under **My Interactive Sessions** to release its allocation. Closing the HTML does not stop a running cell or the allocation.
 
-## Advanced Slurm and managed vLLM preview
+## Advanced ARC jobs and model services preview
 
 Advanced Mode contains an experimental ARC job/service layer. It is intentionally separate from the normal classroom path and does not run arbitrary compute work on a login node.
 
-- **Slurm jobs:** enter your VT PID and authorized allocation, review the generated `sbatch` script, then explicitly submit it. Status, active-job listing, recent stdout, and cancellation use OpenSSH in `BatchMode=yes` against the documented Falcon login hosts. Password/Duo prompts are never collected by ARC Chat.
+- **Workspace inspector:** shows the active backend/profile/Jupyter identifiers plus counts for recorded jobs/artifacts without exposing credentials.
+- **Slurm jobs:** choose one of the documented Falcon L40S/A30/V100/T4 resource profiles or custom reviewed values, enter your VT PID and authorized allocation, review the generated `sbatch` script, then explicitly submit it. Status, active-job listing, recent stdout, cancellation, durable non-secret job history, and artifact links use the documented Falcon/OpenSSH/Slurm path. Password/Duo prompts are never collected by ARC Chat.
+- **Dedicated OOD LLM:** open the normal visible ARC OOD dashboard, launch/review the dedicated LLM application there, then enter that session's ARC-hosted API base and unique generated key. ARC Chat does not invent or depend on an undocumented hidden OOD launch API.
 - **Managed vLLM:** review a Slurm job for a model already available under ARC's `/common/data/models/` tree, submit it, wait until Slurm reports a running compute node, then explicitly start the SSH tunnel. Model traffic goes only to the resulting loopback endpoint. ARC Chat refuses to use the managed provider until a tracked tunnel process is actually alive.
-- **Artifacts:** uploads and generated outputs can be represented as provenance records for future pipeline/workflow features. This registry is metadata only; it does not grant additional filesystem access.
+- **Endpoint registry:** records non-secret provider/model/endpoint reachability (`direct`, `arc_session`, or `loopback_tunnel`) for the current runtime. API keys are never part of the registry.
+- **Artifacts/pipelines:** uploads and job outputs can be represented as durable provenance records. Pipeline graphs are validated as acyclic metadata contracts; resource/code mutations still require explicit review rather than autonomous execution.
 
-These Advanced controls have synthetic/unit coverage but still require a live ARC acceptance test with an authorized account before they should be considered a supported classroom workflow. Student Mode does not expose these controls.
+These Advanced controls are implemented against the official ARC documentation and have synthetic/unit/integration coverage. Credentialed live confirmation is still required before describing them as institutionally supported ARC workflows; it is not a blocker for continued implementation. Student Mode does not expose these controls.
+
+## Local integration API
+
+ARC Chat exposes a token-protected, loopback-only `/api/v1` contract for separate research applications:
+
+- `GET /api/v1/status` — non-secret application/workspace status and capability flags;
+- `GET /api/v1/jobs` — local non-secret Slurm/job provenance;
+- `GET /api/v1/artifacts` — artifact/provenance metadata;
+- `GET/POST /api/v1/proposals` — inspect or submit a handoff proposal for human review;
+- `DELETE /api/v1/proposals/{id}` — dismiss a proposal.
+
+There are deliberately **no** external HTTP routes for Python execution, file mutation, Slurm submit/cancel, or model-service start/stop. External tools request reviewed handoffs; ARC Chat remains the human-approval boundary. See `examples/integration_client.py` for a standard-library example.
 
 ## Run an existing notebook
 
@@ -84,7 +99,7 @@ This runs notebook source within the chat kernel and supports interactive prompt
 
 ## Boundaries and recovery
 
-- The live VT launch selectors, authenticated OOD proxy, and Advanced SSH/Slurm/vLLM path have not been verified in this environment. Login, allocation selection, queueing, compute-node access, scheduler commands, and managed-model startup require an ARC user acceptance test. Visible/manual fallbacks are retained where applicable.
+- ARC-specific Slurm, dedicated-LLM, and vLLM behavior is implemented from official ARC documentation rather than guessed interfaces. Login, allocation selection, queueing, compute-node access, and managed-model startup still require credentialed confirmation before institutional-support claims. Visible/manual fallbacks are retained where ARC does not document a stable machine interface.
 - Launching the instance is a browser-assisted step, not an unattended provisioning API. The app does not bypass MFA or configure VPN.
 - The model API is called from the local helper, not the ARC compute node. Python runs remotely on ARC. VPN/network reachability must permit both services.
 - Local keys and browser cookies are held in process memory, without saved browser profiles or localStorage. User-executed Python and its outputs are saved in the remote notebook and IPython history. Programs can disclose secrets in their output; inspect outputs before sending them to a provider.
@@ -100,17 +115,19 @@ This runs notebook source within the chat kernel and supports interactive prompt
 .venv/bin/python -m unittest discover -s . -p 'test_*.py' -v
 ```
 
-Unit/stress tests cover proxy URL derivation, binary framing, parent-message correlation, completion ordering, model/tool roundtrips, endpoint and upload hardening, stale/multiple UI tabs, request replay/idempotency, recovery metadata, context bounding, artifact contracts, Slurm command generation, managed-vLLM lifecycle contracts, and localhost/token/origin enforcement. A passing local integration test also verifies browser-cookie authentication through a Jupyter URL prefix, real kernel execution, persistent variables, interactive stdin, errors, HTML output, valid notebook persistence, uploads, browser UI execution, and shutdown. Portable-package smoke tests verify that the frozen app serves its UI and contains the headful Chromium runtime. Live ARC login/model/job/service requests still require validation by an authorized user.
+Unit/stress tests cover proxy URL derivation, binary framing, parent-message correlation, completion ordering, model/tool roundtrips, shared/dedicated/managed endpoint policy, upload hardening, stale/multiple UI tabs, request replay/idempotency, versioned recovery metadata, context bounding, artifact/pipeline contracts, documented Falcon resource profiles, Slurm command generation/history, managed-vLLM lifecycle/endpoint-registry contracts, local integration API authority boundaries, accessibility smoke checks, and localhost/token/origin enforcement. The real local integration test verifies browser-cookie authentication through a Jupyter URL prefix, kernel execution, persistent variables, interactive stdin, errors, HTML output, valid notebook persistence, uploads, browser UI execution, and shutdown. Portable-package smoke tests verify that the frozen app serves its UI and contains the headful Chromium runtime. Live ARC login/model/job/service confirmation still requires an authorized user.
 
-Sources: [ARC OOD](https://www.docs.arc.vt.edu/resources/ood.html), [ARC model API](https://docs.arc.vt.edu/ai/011_llm_api_arc_vt_edu.html), [Jupyter REST](https://jupyter-server.readthedocs.io/en/latest/developers/rest-api.html), [Jupyter messages](https://jupyter-client.readthedocs.io/en/stable/messaging.html), [Playwright authentication](https://playwright.dev/python/docs/auth), [OpenAI chat API](https://developers.openai.com/api/reference/resources/chat).
+Sources: [ARC OOD](https://www.docs.arc.vt.edu/resources/ood.html), [ARC shared model API](https://docs.arc.vt.edu/ai/011_llm_api_arc_vt_edu.html), [ARC dedicated OOD LLM](https://docs.arc.vt.edu/ai/020_ood_arc_vt_edu.html), [ARC vLLM](https://docs.arc.vt.edu/ai/030_vllm.html), [ARC Slurm](https://docs.arc.vt.edu/usage/job_scheduling/01_slurm_overview.html), [Falcon](https://docs.arc.vt.edu/resources/compute/02falcon.html), [Jupyter REST](https://jupyter-server.readthedocs.io/en/latest/developers/rest-api.html), [Jupyter messages](https://jupyter-client.readthedocs.io/en/stable/messaging.html), [Playwright authentication](https://playwright.dev/python/docs/auth), [OpenAI chat API](https://developers.openai.com/api/reference/resources/chat).
 
 Optional integration test (local only): install `jupyter-server ipykernel nbformat` into the virtual environment, then run `.venv/bin/python integration_test.py`. It uses ports 8765 and 8877 and temporary files.
 
 ### Course profiles and diagnostics
 
-The built-in `fl2744` profile reads its allocation from `ARC_COURSE_ALLOCATION`. For another course or a managed deployment, point `ARC_CHAT_PROFILE_FILE` at a JSON file with a `profiles` list; each profile may define `id`, `name`, `workspace_backend`, `cluster`, `allocation`, `resource_profile`, `model_provider`, `model_policy`, and `advanced_mode`. Allocation values may reference an environment variable such as `${ARC_COURSE_ALLOCATION}`. Do not put API keys, passwords, browser cookies, or notebook content in profile files. See `profiles.example.json`.
+The built-in `fl2744` profile reads its allocation from `ARC_COURSE_ALLOCATION`. For another course or managed deployment, point `ARC_CHAT_PROFILE_FILE` at a JSON file containing `"version": 1` and a `profiles` list; unsupported future schema versions fail closed. Profiles may define `id`, `name`, `workspace_backend`, `cluster`, `allocation`, `resource_profile`, `model_provider`, `model_policy`, `allowed_models`, and `advanced_mode`. Allocation values may reference an environment variable such as `${ARC_COURSE_ALLOCATION}`. Do not put API keys, passwords, browser cookies, or notebook content in profile files. See `profiles.example.json`.
 
 Use **Run diagnostics** to generate an in-app health report. It contains runtime, browser, workspace, and model-configuration status but excludes credentials, cookies, chat content, and notebook contents. Advanced Mode also provides **Run full workspace checks**, which explicitly tests OOD visibility, model reachability, Jupyter reachability, a temporary remote write/delete, and a visible kernel smoke-test cell.
+
+Security/data boundaries are documented in `SECURITY.md` and `docs/SECURITY_AND_DATA.md`; support/escalation is in `SUPPORT.md`; contributor/governance and release/deprecation policy are in `CONTRIBUTING.md`, `GOVERNANCE.md`, and `docs/RELEASE_POLICY.md`. The project-wide copyright/open-source license decision remains explicitly unresolved in `docs/LICENSING.md` rather than being guessed by the application.
 
 Every push and pull request targeting `main` runs the test matrix on Ubuntu, Windows, and macOS across supported Python versions, plus local-Jupyter integration and packaging checks. Version tags (`v*`) trigger the preview release workflow, which builds self-contained Windows/macOS packages, the lightweight macOS bootstrap, Linux/source archives, smoke-tests the portable apps, and publishes SHA-256 checksums as a prerelease.
 
@@ -124,7 +141,7 @@ Automatic attachment tracks the tab opened by Connect ready session (including p
 
 The helper continuously reads kernel WebSocket messages between code runs to maintain ping/pong. If the connection closes while idle, new execution reconnects to the same existing kernel without clearing variables or history. Busy kernels are preserved and require waiting or interruption; code is never automatically replayed after a mid-execution disconnect.
 
-Recovery from an OOD 502/503/504: check My Interactive Sessions for a reachable running Jupyter job. Connect ready session can switch from a stale server to the newly opened server without deleting the old kernel or files. Disconnect old session clears only local connection references when needed. Switching to a different server creates a fresh Python workspace; saved files remain on their original filesystem, but in-memory variables are not transferred. A helper restart can reattach a still-running previously recorded session when it is safely discoverable, without executing notebook cells. Updating the files does not hot-reload a running helper: quit the helper and reopen the app to use build 2026.09.17.10.
+Recovery from an OOD 502/503/504: check My Interactive Sessions for a reachable running Jupyter job. Connect ready session can switch from a stale server to the newly opened server without deleting the old kernel or files. Disconnect old session clears only local connection references when needed. Switching to a different server creates a fresh Python workspace; saved files remain on their original filesystem, but in-memory variables are not transferred. A helper restart can reattach a still-running previously recorded session when it is safely discoverable, without executing notebook cells. Updating the files does not hot-reload a running helper: quit the helper and reopen the app to use build 2026.09.17.11.
 
 ## Certificate verification on macOS
 

@@ -10,12 +10,13 @@ from artifacts import ArtifactStore
 from context_window import bounded_history, truncate_text
 from diagnostics import Doctor
 from errors import classify_error
-from jobs import JobSpec, SlurmBackend, SshCommandGateway
+from integration import ProposalStore
+from jobs import JobHistory, JobSpec, RESOURCE_PROFILES, SlurmBackend, SshCommandGateway, get_resource_profile
 from model_providers import ARC_ENDPOINT, ModelCatalog, build_provider
 from ood import OODBrowserAdapter
 from protocol import CommandEnvelope, PROTOCOL_VERSION, ReplayCache
 from security import redact_text
-from services import SshTunnel, VllmServiceManager, VllmServiceSpec
+from services import EndpointRegistry, SshTunnel, VllmServiceManager, VllmServiceSpec
 from state import AppState, AppStateMachine, InvalidTransition
 from version import BUILD, VERSION
 from workspace import JupyterWorkspace
@@ -122,6 +123,9 @@ class Bridge:
         self.replay = ReplayCache()
         self.inflight_requests = set()
         self.artifacts = ArtifactStore()
+        self.job_history = JobHistory()
+        self.integration_proposals = ProposalStore()
+        self.endpoint_registry = EndpointRegistry()
         self.vllm_service = None
         self.vllm_tunnel = None
         self.last_job_id = ''
@@ -141,6 +145,10 @@ class Bridge:
         self.workspace = JupyterWorkspace(self)
         self.recovery_path = self._recovery_path() if enable_recovery else None
         self.recovery_metadata = self._load_recovery_state() if enable_recovery else {}
+        if self.recovery_metadata:
+            self.artifacts = ArtifactStore.from_records(self.recovery_metadata.get('artifacts'))
+            self.job_history = JobHistory.from_records(self.recovery_metadata.get('jobs'))
+            self.last_job_id = str(self.recovery_metadata.get('job_id') or '')
 
     @staticmethod
     def _recovery_path():
@@ -163,9 +171,9 @@ class Bridge:
             return {}
         try:
             value = json.loads(self.recovery_path.read_text(encoding='utf-8'))
-            if not isinstance(value, dict) or value.get('version') != 1:
+            if not isinstance(value, dict) or value.get('version') not in {1, 2}:
                 return {}
-            return {k:value.get(k) for k in ('version','build','app_version','profile','workspace_base','notebook_path','session_id','job_id','saved_at')}
+            return {k:value.get(k) for k in ('version','build','app_version','profile','workspace_base','notebook_path','session_id','job_id','jobs','artifacts','saved_at')}
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return {}
 
@@ -173,7 +181,7 @@ class Bridge:
         if self.recovery_path is None:
             return
         payload = {
-            'version': 1,
+            'version': 2,
             'build': self.build,
             'app_version': self.version,
             'profile': self.profile.id,
@@ -181,6 +189,8 @@ class Bridge:
             'notebook_path': self.notebook_path,
             'session_id': self.session,
             'job_id': self.last_job_id,
+            'jobs': self.job_history.export_records(),
+            'artifacts': self.artifacts.export_records(),
             'saved_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         self.recovery_path.parent.mkdir(parents=True, exist_ok=True)
@@ -626,6 +636,14 @@ class Bridge:
         provider = build_provider(self.http, provider_name, endpoint, self.key)
         self.model_config = {'provider': provider_name, 'endpoint': endpoint, 'model': model}
         result=await provider.complete(body)
+        reachability = 'loopback_tunnel' if provider_name == 'managed' else ('arc_session' if provider_name == 'arc_dedicated' else 'direct')
+        self.endpoint_registry.upsert(
+            provider=provider_name,
+            model=model,
+            endpoint=endpoint,
+            reachability=reachability,
+            job_id=str(getattr(self.vllm_service, 'job_id', '') or '') if provider_name == 'managed' else '',
+        )
         msg=result['choices'][0]['message']
         calls=msg.get('tool_calls') or []
         if len(calls)>1: raise ValueError('Model returned multiple tools. Ask it for one step at a time.')
@@ -655,16 +673,25 @@ class Bridge:
 
     def job_spec(self, d):
         account = str(d.get('job_account') or self.profile.resolved_allocation() or '').strip()
+        selected = str(d.get('job_profile', '')).strip()
+        resource = get_resource_profile(selected) if selected and selected != 'custom' else None
+        partition = str(d.get('job_partition') or (resource.partition if resource else 'l40s_normal_q')).strip()
+        walltime = str(d.get('job_walltime') or (resource.walltime if resource else '01:00:00')).strip()
+        cpus = int(d.get('job_cpus') or (resource.cpus_per_task if resource else 8))
+        gpus = int(d.get('job_gpus') if str(d.get('job_gpus', '')).strip() else (resource.gpus if resource else 0))
+        gpu_type = str(d.get('job_gpu_type') or (resource.gpu_type if resource else 'l40s')).strip()
+        memory = int(d['job_memory']) if str(d.get('job_memory', '')).strip() else (resource.memory_gb if resource else None)
+        qos = str(d.get('job_qos') or (resource.qos if resource else '')).strip()
         return JobSpec(
             account=account,
             command=str(d.get('job_command', '')).strip(),
-            partition=str(d.get('job_partition', 'l40s_normal_q')).strip(),
-            walltime=str(d.get('job_walltime', '01:00:00')).strip(),
-            cpus_per_task=int(d.get('job_cpus', 8)),
-            gpus=int(d.get('job_gpus', 0)),
-            gpu_type=str(d.get('job_gpu_type', 'l40s')).strip(),
-            memory_gb=int(d['job_memory']) if str(d.get('job_memory', '')).strip() else None,
-            qos=str(d.get('job_qos', '')).strip(),
+            partition=partition,
+            walltime=walltime,
+            cpus_per_task=cpus,
+            gpus=gpus,
+            gpu_type=gpu_type,
+            memory_gb=memory,
+            qos=qos,
             name=str(d.get('job_name', 'arc-chat')).strip(),
         )
 
@@ -681,6 +708,7 @@ class Bridge:
             walltime=str(d.get('job_walltime', '1-00:00:00')).strip(),
             partition=str(d.get('job_partition', 'l40s_normal_q')).strip(),
             gpu_type=str(d.get('job_gpu_type', 'l40s')).strip(),
+            qos=str(d.get('job_qos', 'fal_l40s_normal_base')).strip() or 'fal_l40s_normal_base',
             tool_call_parser=str(d.get('vllm_tool_parser', 'openai')).strip(),
             reasoning_parser=str(d.get('vllm_reasoning_parser', '')).strip(),
         )
@@ -704,6 +732,9 @@ class Bridge:
             asyncio.get_running_loop().call_later(1,os.kill,os.getpid(),signal.SIGTERM)
             return 'Stopping helper and chat kernel. End the OOD job separately to release the allocation.'
         if action=='open': return await self.ood.open()
+        if action=='open_dedicated_llm':
+            result = await self.ood.open()
+            return result + ' In the visible OOD dashboard, launch the dedicated LLM application, review its resources, then copy that session\'s API base and generated API key into Advanced Mode.'
         if action=='start_workspace': return await self.start_workspace()
         if action=='prepare': return await self.ood.prepare(d['account'])
         if action=='launch': return await self.ood.launch()
@@ -732,13 +763,43 @@ class Bridge:
                 endpoint=str(d.get('endpoint','')).rstrip('/')
                 if provider_name=='arc' and endpoint!=ARC_ENDPOINT:
                     raise ValueError('Virginia Tech ARC models must use the configured ARC endpoint.')
-                catalog=await ModelCatalog.discover(self.http,endpoint,key,provider='arc_shared' if provider_name=='arc' else provider_name)
+                catalog=await ModelCatalog.discover(self.http,endpoint,key,provider='arc_shared' if provider_name=='arc' else ('arc_dedicated' if provider_name=='arc_dedicated' else provider_name))
                 items=[entry.__dict__ for entry in catalog.entries]
             await self.emit('models',items=items)
             return f'Model catalog refreshed ({len(items)} model(s)).'
         if action=='artifacts':
             await self.emit('artifacts', items=[item.__dict__ for item in self.artifacts.list()])
             return 'Artifact registry refreshed.'
+        if action=='workspace_inspect':
+            workspace = await self.workspace.status() if self.kernel else {
+                'state':'disconnected', 'kernel':None, 'session':None,
+                'notebook':self.notebook_path, 'base':self.base,
+            }
+            await self.emit('workspace_inspector', item={
+                'backend': getattr(self.workspace, 'backend', 'unknown'),
+                'profile': self.profile.id,
+                'workspace': workspace,
+                'jobs_recorded': len(self.job_history.list()),
+                'artifacts_recorded': len(self.artifacts.list()),
+                'model': dict(self.model_config),
+            })
+            return 'Workspace inspector refreshed.'
+        if action=='endpoints':
+            await self.emit('endpoints', items=[item.public_dict() for item in self.endpoint_registry.list()])
+            return f'Loaded {len(self.endpoint_registry.list())} registered endpoint(s).'
+        if action=='resource_profiles':
+            await self.emit('resource_profiles', items=[profile.public_dict() for profile in RESOURCE_PROFILES.values()])
+            return f'Loaded {len(RESOURCE_PROFILES)} documented ARC resource profile(s).'
+        if action=='job_history':
+            await self.emit('job_history', items=self.job_history.export_records())
+            return f'Loaded {len(self.job_history.list())} recorded job(s).'
+        if action=='integration_proposals':
+            await self.emit('integration_proposals', items=[item.public_dict() for item in self.integration_proposals.list()])
+            return f'Loaded {len(self.integration_proposals.list())} external proposal(s).'
+        if action=='integration_dismiss':
+            self.integration_proposals.dismiss(str(d.get('proposal_id', '')))
+            await self.emit('integration_proposals', items=[item.public_dict() for item in self.integration_proposals.list()])
+            return 'External proposal dismissed. No ARC action was executed.'
         if action=='job_preview':
             spec = self.job_spec(d)
             await self.emit('job_preview', script=spec.script(), spec=spec.public_dict())
@@ -748,25 +809,42 @@ class Bridge:
             spec = self.job_spec(d)
             job_id = await backend.submit(spec)
             self.last_job_id = job_id
+            self.job_history.record_submission(job_id, spec)
             self.persist_recovery_state()
             await self.emit('job', item={'job_id':job_id, 'state':'SUBMITTED', 'name':spec.name})
             return f'Submitted Slurm job {job_id}. No compute command was run on the login node.'
         if action=='job_list':
             items = await self.slurm_backend(d).list_active()
+            for item in items:
+                self.job_history.update(item['job_id'], state=item.get('state',''), node=item.get('node',''), reason=item.get('reason',''))
+            self.persist_recovery_state()
             await self.emit('jobs', items=items)
             return f'Found {len(items)} active/pending Slurm job(s).'
         if action=='job_status':
             item = await self.slurm_backend(d).status(str(d.get('job_id', '')).strip())
+            self.job_history.update(item['job_id'], state=item.get('state',''), node=item.get('node',''), reason=item.get('reason',''))
+            self.persist_recovery_state()
             await self.emit('job', item=item)
             return f"Job {item['job_id']}: {item['state']}."
         if action=='job_logs':
             job_id = str(d.get('job_id', '')).strip()
             text = await self.slurm_backend(d).logs(job_id)
+            artifact = self.artifacts.register(
+                f'jobs/{job_id}/stdout.txt', workspace='slurm', created_by=f'slurm-job:{job_id}',
+                type='log', media_type='text/plain', metadata={'job_id':job_id, 'source':'Slurm StdOut'},
+            )
+            try:
+                self.job_history.link_artifact(job_id, artifact.id)
+            except KeyError:
+                pass
+            self.persist_recovery_state()
             await self.emit('job_logs', job_id=job_id, text=truncate_text(text, 64000))
             return f'Loaded recent stdout for job {job_id}.'
         if action=='job_cancel':
             job_id = str(d.get('job_id', '')).strip()
             await self.slurm_backend(d).cancel(job_id)
+            self.job_history.update(job_id, state='CANCELLED')
+            self.persist_recovery_state()
             return f'Cancelled Slurm job {job_id}.'
         if action=='vllm_preview':
             spec = self.vllm_spec(d)
@@ -778,8 +856,11 @@ class Bridge:
             if self.vllm_service and self.vllm_service.state not in {'CANCELLED','COMPLETED','FAILED','TIMEOUT'}:
                 raise ValueError('A managed vLLM service is already tracked. Stop it before starting another.')
             manager = VllmServiceManager(self.slurm_backend(d))
-            self.vllm_service = await manager.start(self.vllm_spec(d))
+            spec = self.vllm_spec(d)
+            api_key = spec.resolved_api_key()
+            self.vllm_service = await manager.start(spec, api_key=api_key)
             self.last_job_id = self.vllm_service.job_id
+            self.job_history.record_submission(self.vllm_service.job_id, spec.job_spec(api_key=api_key), kind='vllm')
             self.persist_recovery_state()
             self.remember_secret(self.vllm_service.api_key)
             await self.emit('service', item=self.service_public())
@@ -787,6 +868,8 @@ class Bridge:
         if action=='vllm_refresh':
             if not self.vllm_service: raise ValueError('No managed vLLM service is tracked.')
             self.vllm_service = await VllmServiceManager(self.slurm_backend(d)).refresh(self.vllm_service)
+            self.job_history.update(self.vllm_service.job_id, state=self.vllm_service.state, node=self.vllm_service.node)
+            self.persist_recovery_state()
             await self.emit('service', item=self.service_public())
             return f'vLLM job {self.vllm_service.job_id}: {self.vllm_service.state}.'
         if action=='vllm_tunnel':
@@ -802,6 +885,12 @@ class Bridge:
             await self.vllm_tunnel.start()
             self.key = self.vllm_service.api_key
             self.model_config = {'provider':'managed','endpoint':self.vllm_service.local_endpoint(self.vllm_tunnel.local_port),'model':self.vllm_service.model}
+            self.endpoint_registry.upsert(
+                provider='managed', model=self.vllm_service.model,
+                endpoint=self.model_config['endpoint'], reachability='loopback_tunnel',
+                state=self.vllm_service.state, job_id=self.vllm_service.job_id,
+                metadata={'remote_node':self.vllm_service.node, 'remote_port':self.vllm_service.port},
+            )
             await self.emit('service', item=self.service_public())
             return 'SSH tunnel started. ARC Chat can now use the managed vLLM endpoint through localhost.'
         if action=='vllm_stop':
@@ -809,6 +898,9 @@ class Bridge:
             if self.vllm_tunnel:
                 await self.vllm_tunnel.stop(); self.vllm_tunnel=None
             await VllmServiceManager(self.slurm_backend(d)).stop(self.vllm_service)
+            self.job_history.update(self.vllm_service.job_id, state='CANCELLED')
+            self.endpoint_registry.remove_job(self.vllm_service.job_id)
+            self.persist_recovery_state()
             await self.emit('service', item=self.service_public())
             return f'Cancelled vLLM Slurm job {self.vllm_service.job_id} and stopped its local tunnel.'
         if action=='chat': return await self.chat(d)
@@ -855,15 +947,79 @@ class Bridge:
 bridge=Bridge(enable_recovery=__name__=='__main__')
 @web.middleware
 async def guard(request, handler):
-    if request.host != f'127.0.0.1:{PORT}': raise web.HTTPForbidden()
+    transport = getattr(request, 'transport', None)
+    sockname = transport.get_extra_info('sockname') if transport else None
+    expected_host = f'127.0.0.1:{sockname[1]}' if isinstance(sockname, tuple) and len(sockname) >= 2 else f'127.0.0.1:{PORT}'
+    if request.host != expected_host: raise web.HTTPForbidden()
     origin=request.headers.get('Origin')
-    if origin and origin != f'http://127.0.0.1:{PORT}': raise web.HTTPForbidden()
+    if origin and origin != f'http://{expected_host}': raise web.HTTPForbidden()
     if request.path!='/' and not secrets.compare_digest(request.query.get('token',''),TOKEN): raise web.HTTPForbidden()
     response=await handler(request)
     if not isinstance(response,web.WebSocketResponse): response.headers['Cache-Control']='no-store'
     return response
 
 async def index(request): return web.FileResponse(ROOT/'arc-chat.html')
+
+def integration_snapshot():
+    return {
+        'api_version': 1,
+        'app_version': bridge.version,
+        'build': bridge.build,
+        'protocol_version': bridge.protocol_version,
+        'state': bridge.state_machine.state.value,
+        'profile': bridge.profile.id,
+        'workspace': {
+            'attached': bool(bridge.kernel),
+            'notebook_path': bridge.notebook_path or '',
+        },
+        'last_job_id': bridge.last_job_id,
+        'capabilities': {
+            'read_status': True,
+            'read_jobs': True,
+            'read_artifacts': True,
+            'submit_review_proposal': True,
+            'execute_resource_mutation': False,
+        },
+    }
+
+async def api_status(request):
+    return web.json_response(integration_snapshot())
+
+async def api_artifacts(request):
+    return web.json_response({'api_version':1, 'items':bridge.artifacts.export_records()})
+
+async def api_jobs(request):
+    return web.json_response({'api_version':1, 'items':bridge.job_history.export_records()})
+
+async def api_proposals(request):
+    if request.method == 'GET':
+        return web.json_response({'api_version':1, 'items':[item.public_dict() for item in bridge.integration_proposals.list()]})
+    try:
+        value = await request.json()
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text='Proposal body must be JSON.') from exc
+    if not isinstance(value, dict):
+        raise web.HTTPBadRequest(text='Proposal body must be an object.')
+    try:
+        proposal = bridge.integration_proposals.create(
+            kind=str(value.get('kind','')),
+            summary=str(value.get('summary','')),
+            source=str(value.get('source','external')),
+            payload=value.get('payload') if isinstance(value.get('payload'), dict) else {},
+        )
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    await bridge.emit('integration_proposal', item=proposal.public_dict())
+    return web.json_response({'api_version':1, 'proposal':proposal.public_dict(), 'executed':False}, status=202)
+
+async def api_proposal_delete(request):
+    try:
+        bridge.integration_proposals.dismiss(request.match_info['proposal_id'])
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    await bridge.emit('integration_proposals', items=[item.public_dict() for item in bridge.integration_proposals.list()])
+    return web.json_response({'api_version':1, 'dismissed':True, 'executed':False})
+
 async def socket(request):
     ws=web.WebSocketResponse(max_msg_size=32*1024*1024)
     await ws.prepare(request)
@@ -918,7 +1074,8 @@ async def socket(request):
             await ws.send_json({'type':'state','state':bridge.state_machine.state.value,
                                 'display':bridge.state_machine.state.value.replace('_',' ').title(),
                                 'profile':bridge.profile.public_dict(),
-                                'profile_error':bridge.profile_error})
+                                'profile_error':bridge.profile_error,
+                                'resource_profiles':[profile.public_dict() for profile in RESOURCE_PROFILES.values()]})
         if bridge.recovery_metadata.get('notebook_path') or bridge.recovery_metadata.get('job_id'):
             await ws.send_json({'type':'recovery',
                                 'notebook_path':bridge.recovery_metadata.get('notebook_path') or '',
@@ -995,22 +1152,35 @@ async def lifecycle(app):
     if bridge.pw: await bridge.pw.stop()
     await bridge.http.close()
 
-if __name__=='__main__':
-    app=web.Application(middlewares=[guard]); app.router.add_get('/',index); app.router.add_get('/ws',socket)
-    app.cleanup_ctx.append(lifecycle)
+async def launch(app):
     url=f'http://127.0.0.1:{PORT}/#'+TOKEN
+    if os.environ.get('ARC_CHAT_BROWSER_SMOKE'):
+        smoke_pw = await async_playwright().start()
+        try:
+            smoke_browser = await smoke_pw.chromium.launch(headless=True, channel='chromium')
+            await smoke_browser.close()
+        finally:
+            await smoke_pw.stop()
+    if os.environ.get('ARC_CHAT_STATE'):
+        bridge.persist_state()
+    if not os.environ.get('ARC_CHAT_NO_OPEN'):
+        asyncio.get_running_loop().call_later(1,webbrowser.open,url)
+
+def create_app(*, include_lifecycle=True, include_launch=False):
+    app=web.Application(middlewares=[guard]); app.router.add_get('/',index); app.router.add_get('/ws',socket)
+    app.router.add_get('/api/v1/status',api_status)
+    app.router.add_get('/api/v1/artifacts',api_artifacts)
+    app.router.add_get('/api/v1/jobs',api_jobs)
+    app.router.add_get('/api/v1/proposals',api_proposals)
+    app.router.add_post('/api/v1/proposals',api_proposals)
+    app.router.add_delete('/api/v1/proposals/{proposal_id}',api_proposal_delete)
+    if include_lifecycle:
+        app.cleanup_ctx.append(lifecycle)
+    if include_launch:
+        app.on_startup.append(launch)
+    return app
+
+if __name__=='__main__':
+    app=create_app(include_lifecycle=True, include_launch=True)
     print('Opening local ARC Chat. Keep this terminal open. Ctrl-C stops the helper.')
-    async def launch(app):
-        if os.environ.get('ARC_CHAT_BROWSER_SMOKE'):
-            smoke_pw = await async_playwright().start()
-            try:
-                smoke_browser = await smoke_pw.chromium.launch(headless=True, channel='chromium')
-                await smoke_browser.close()
-            finally:
-                await smoke_pw.stop()
-        if os.environ.get('ARC_CHAT_STATE'):
-            bridge.persist_state()
-        if not os.environ.get('ARC_CHAT_NO_OPEN'):
-            asyncio.get_running_loop().call_later(1,webbrowser.open,url)
-    app.on_startup.append(launch)
     web.run_app(app,host='127.0.0.1',port=PORT,access_log=None)

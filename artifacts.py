@@ -93,6 +93,31 @@ class ArtifactStore:
     def export_json(self) -> str:
         return json.dumps([asdict(item) for item in self._records.values()], indent=2, sort_keys=True)
 
+    def export_records(self) -> list[dict[str, Any]]:
+        return [asdict(item) for item in self._records.values()]
+
+    @classmethod
+    def from_records(cls, values: Any, *, limit: int = 500) -> "ArtifactStore":
+        store = cls()
+        if not isinstance(values, list):
+            return store
+        allowed = {item.name for item in __import__("dataclasses").fields(ArtifactRecord)}
+        for value in values[-max(1, min(5000, int(limit))):]:
+            if not isinstance(value, dict):
+                continue
+            try:
+                filtered = {key: value[key] for key in allowed if key in value}
+                record = ArtifactRecord(**filtered)
+                if not ARTIFACT_ID_RE.fullmatch(record.id):
+                    continue
+                safe_workspace_path(record.path)
+                if not isinstance(record.metadata, dict):
+                    continue
+                store.add(record)
+            except (TypeError, ValueError):
+                continue
+        return store
+
 
 @dataclass(frozen=True)
 class PipelineStep:
@@ -116,4 +141,21 @@ class PipelineGraph:
             unknown = set(step.inputs) - valid
             if unknown:
                 raise ValueError(f"Pipeline step {step.id!r} references unknown inputs: {sorted(unknown)}")
+        dependencies = {step.id: set(step.inputs) for step in self.steps}
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(step_id: str) -> None:
+            if step_id in visiting:
+                raise ValueError("Pipeline graph contains a cycle.")
+            if step_id in visited:
+                return
+            visiting.add(step_id)
+            for dependency in dependencies[step_id]:
+                visit(dependency)
+            visiting.remove(step_id)
+            visited.add(step_id)
+
+        for step_id in ids:
+            visit(step_id)
 

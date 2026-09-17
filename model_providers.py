@@ -16,6 +16,7 @@ from aiohttp import ClientConnectionError, ClientTimeout
 
 ARC_ENDPOINT = "https://llm-api.arc.vt.edu/api/v1"
 OPENAI_ENDPOINT = "https://api.openai.com/v1"
+ARC_DOMAIN = "arc.vt.edu"
 
 
 class EndpointPolicy:
@@ -51,6 +52,22 @@ class EndpointPolicy:
             raise ValueError("Model API URL cannot use an ambiguous numeric host.")
         if not allow_custom and value not in {ARC_ENDPOINT, OPENAI_ENDPOINT}:
             raise ValueError("This course profile only permits the configured model provider.")
+        return value
+
+    @staticmethod
+    def validate_arc_dedicated(endpoint: str) -> str:
+        """Validate an ARC-hosted dedicated-session API base.
+
+        ARC documents dedicated Open OnDemand LLM sessions as on-premises,
+        OpenAI-compatible services with a unique API key per session.  The
+        documentation does not promise one permanent URL shape, so ARC Chat
+        accepts any HTTPS endpoint on the ARC DNS domain rather than inventing
+        an undocumented fixed path.
+        """
+        value = EndpointPolicy.validate(endpoint)
+        host = (urlsplit(value).hostname or "").lower().rstrip(".")
+        if host != ARC_DOMAIN and not host.endswith("." + ARC_DOMAIN):
+            raise ValueError("Dedicated ARC model URLs must use an arc.vt.edu HTTPS host.")
         return value
 
 
@@ -193,6 +210,12 @@ class ArcSharedModelProvider(OpenAICompatibleProvider):
         super().__init__(http, endpoint, key, **kwargs)
 
 
+class ArcDedicatedModelProvider(OpenAICompatibleProvider):
+    def __init__(self, http, key: str, endpoint: str, **kwargs):
+        endpoint = EndpointPolicy.validate_arc_dedicated(endpoint)
+        super().__init__(http, endpoint, key, **kwargs)
+
+
 class OpenAIModelProvider(OpenAICompatibleProvider):
     def __init__(self, http, key: str, endpoint: str = OPENAI_ENDPOINT, **kwargs):
         super().__init__(http, endpoint, key, **kwargs)
@@ -210,6 +233,8 @@ class ManagedTunnelProvider(OpenAICompatibleProvider):
 def build_provider(http, provider: str, endpoint: str, key: str) -> OpenAICompatibleProvider:
     if provider == "arc":
         return ArcSharedModelProvider(http, key, endpoint)
+    if provider == "arc_dedicated":
+        return ArcDedicatedModelProvider(http, key, endpoint)
     if provider == "openai":
         return OpenAIModelProvider(http, key, endpoint)
     if provider == "custom":

@@ -8,7 +8,10 @@ import nbformat
 import helper
 
 async def main():
-    with tempfile.TemporaryDirectory(prefix='arc-test-') as temp:
+    # Windows can keep Jupyter/IPython log/SQLite handles alive for a fraction
+    # of a second after the server/kernel exits. That must not turn a completed
+    # integration run into a false negative during temporary-directory cleanup.
+    with tempfile.TemporaryDirectory(prefix='arc-test-', ignore_cleanup_errors=(os.name=='nt')) as temp:
         env=os.environ|{'JUPYTER_RUNTIME_DIR':temp,'IPYTHONDIR':temp+'/ipython','JUPYTER_CONFIG_DIR':temp+'/config'}
         log=open(temp+'/server.log','w')
         proc=subprocess.Popen([sys.executable,'-m','jupyter_server','--no-browser','--ServerApp.port=8877',
