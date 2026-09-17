@@ -16,6 +16,8 @@ class Workspace(Protocol):
     async def execute(self, code: str) -> str: ...
     async def interrupt(self) -> None: ...
     async def list_files(self, path: str = "") -> list[dict[str, Any]]: ...
+    async def upload(self, path: str, content: str) -> dict[str, Any]: ...
+    async def download(self, path: str) -> dict[str, Any]: ...
     async def stop(self) -> str: ...
 
 
@@ -52,6 +54,16 @@ class JupyterWorkspace:
     async def list_files(self, path: str = "") -> list[dict[str, Any]]:
         listing = await self.bridge.api("GET", "api/contents/" + self.bridge.quote_path(path))
         return listing["content"]
+
+    async def upload(self, path: str, content: str) -> dict[str, Any]:
+        return await self.bridge.api(
+            "PUT",
+            "api/contents/" + self.bridge.quote_path(path),
+            {"type": "file", "format": "base64", "content": content},
+        )
+
+    async def download(self, path: str) -> dict[str, Any]:
+        return await self.bridge.api("GET", "api/contents/" + self.bridge.quote_path(path))
 
     async def stop(self) -> str:
         return await self.bridge.stop_workspace()

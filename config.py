@@ -65,7 +65,7 @@ class CourseProfile:
     def allowed_provider_names(self, advanced: bool) -> set[str]:
         """Return protocol provider names permitted by this profile."""
         if advanced and self.model_policy == "user_selected":
-            return {"arc", "openai", "custom"}
+            return {"arc", "openai", "custom", "managed"}
         provider = {"arc_shared": "arc", "openai": "openai", "custom": "custom"}[self.model_provider]
         return {provider}
 

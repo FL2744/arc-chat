@@ -100,5 +100,77 @@ class DoctorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("checks", report)
 
 
+class RecoveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_recovery_state_excludes_secrets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "recovery.json"
+            previous = os.environ.get("ARC_CHAT_RECOVERY_STATE")
+            os.environ["ARC_CHAT_RECOVERY_STATE"] = str(path)
+            try:
+                bridge = Bridge(enable_recovery=True)
+                bridge.key = "model-secret-key"
+                bridge.remember_secret("another-secret-value")
+                bridge.base = "https://example.org/node/job/"
+                bridge.notebook_path = "ARC-chat-test.ipynb"
+                bridge.session = "session-123"
+                bridge.last_job_id = "4567"
+                bridge.persist_recovery_state()
+                rendered = path.read_text(encoding="utf-8")
+                self.assertNotIn("model-secret-key", rendered)
+                self.assertNotIn("another-secret-value", rendered)
+                saved = json.loads(rendered)
+                self.assertEqual(saved["job_id"], "4567")
+                self.assertEqual(saved["notebook_path"], "ARC-chat-test.ipynb")
+            finally:
+                if previous is None:
+                    os.environ.pop("ARC_CHAT_RECOVERY_STATE", None)
+                else:
+                    os.environ["ARC_CHAT_RECOVERY_STATE"] = previous
+
+    async def test_attach_can_resume_prior_kernel_without_replaying_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.environ.get("ARC_CHAT_RECOVERY_STATE")
+            os.environ["ARC_CHAT_RECOVERY_STATE"] = str(Path(directory) / "recovery.json")
+            try:
+                bridge = Bridge(enable_recovery=True)
+                bridge.context = object()
+                base = "https://example.org/node/job/"
+                bridge.recovery_metadata = {
+                    "version": 1,
+                    "workspace_base": base,
+                    "notebook_path": "ARC-chat-prior.ipynb",
+                    "session_id": "session-old",
+                    "job_id": "",
+                }
+                calls = []
+
+                async def api(method, path, data=None):
+                    calls.append((method, path))
+                    if path == "api/sessions":
+                        return [{"id": "session-old", "path": "ARC-chat-prior.ipynb", "kernel": {"id": "kernel-old"}}]
+                    if path == "api/contents/ARC-chat-prior.ipynb":
+                        return {"content": {"cells": [{"cell_type": "code", "source": "x=1", "outputs": []}]}}
+                    raise AssertionError(path)
+
+                opened = []
+                async def open_channel():
+                    opened.append(True)
+
+                bridge.api = api
+                bridge.open_channel = open_channel
+                result = await bridge.attach(base + "tree/ARC-chat-prior.ipynb", "python3")
+                self.assertIn("Recovered", result)
+                self.assertEqual(bridge.kernel, "kernel-old")
+                self.assertEqual(bridge.session, "session-old")
+                self.assertEqual(bridge.cells[0]["source"], "x=1")
+                self.assertTrue(opened)
+                self.assertFalse(any(path == "api/sessions" and method == "POST" for method, path in calls))
+            finally:
+                if previous is None:
+                    os.environ.pop("ARC_CHAT_RECOVERY_STATE", None)
+                else:
+                    os.environ["ARC_CHAT_RECOVERY_STATE"] = previous
+
+
 if __name__ == "__main__":
     unittest.main()

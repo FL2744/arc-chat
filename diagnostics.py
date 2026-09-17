@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import importlib.util
 import platform
+import shutil
 import sys
 import uuid
 from dataclasses import dataclass, asdict
 from typing import Any
 
 from aiohttp import ClientTimeout
+from model_providers import ModelCatalog
 
 
 @dataclass(frozen=True)
@@ -37,21 +39,37 @@ class Doctor:
             DiagnosticCheck("runtime", "pass" if sys.version_info >= (3, 10) else "fail", f"Python {platform.python_version()}"),
             DiagnosticCheck("aiohttp", "pass" if importlib.util.find_spec("aiohttp") else "fail", "HTTP runtime available"),
             DiagnosticCheck("playwright", "pass" if importlib.util.find_spec("playwright") else "fail", "Browser automation package available"),
+            DiagnosticCheck("ssh_client", "pass" if shutil.which("ssh") else "attention", "OpenSSH client available" if shutil.which("ssh") else "OpenSSH client is not on PATH; Advanced Slurm/vLLM SSH features will be unavailable"),
             DiagnosticCheck("local_helper", "pass", "Loopback helper is running"),
             DiagnosticCheck("browser", "pass" if b.context else "attention", "ARC browser session is available" if b.context else "Open ARC / sign in when remote workspace is needed"),
             DiagnosticCheck("workspace", "pass" if b.kernel else "attention", "Jupyter workspace attached" if b.kernel else "No Jupyter workspace attached"),
             DiagnosticCheck("model_key", "pass" if b.key else "attention", "Model key is held in memory" if b.key else "Model key has not been entered"),
             profile_check,
         ]
+        model_id = str(getattr(b, "model_config", {}).get("model", "") or "")
+        provider_id = str(getattr(b, "model_config", {}).get("provider", "") or "")
+        catalog_entry = ModelCatalog().get(model_id)
+        if provider_id == "managed" and getattr(b, "vllm_service", None):
+            checks.append(DiagnosticCheck("model_selection", "pass", f"Managed model selected: {model_id}", "Tool calling is enabled by the reviewed vLLM service configuration."))
+        elif catalog_entry and "tool_calling" in catalog_entry.capabilities:
+            checks.append(DiagnosticCheck("model_selection", "pass", f"Tool-capable model selected: {model_id}"))
+        elif model_id:
+            checks.append(DiagnosticCheck("model_selection", "attention", f"Model capability is not known locally: {model_id}", "Refresh the model catalog or verify tool-calling support before agent use."))
+        transitions = []
+        for item in getattr(getattr(b, "state_machine", None), "history", [])[-20:]:
+            reason = b.redacted(item.reason) if hasattr(b, "redacted") else item.reason
+            transitions.append({"state": item.state.value, "display": item.display, "reason": reason, "changed_at": item.changed_at})
         if full:
             checks.extend(await self._remote_checks())
         return {
-            "version": getattr(b, "build", "unknown"),
+            "version": getattr(b, "version", "unknown"),
+            "build": getattr(b, "build", "unknown"),
             "platform": f"{platform.system()} {platform.release()} ({platform.machine()})",
             "state": getattr(getattr(b, "state_machine", None), "state", "unknown").value if getattr(getattr(b, "state_machine", None), "state", None) else "unknown",
             "profile": getattr(getattr(b, "profile", None), "id", "unknown"),
             "full": full,
             "checks": [asdict(check) for check in checks],
+            "transitions": transitions,
         }
 
     async def _remote_checks(self) -> list[DiagnosticCheck]:

@@ -6,10 +6,18 @@ from urllib.parse import urlsplit, urlunsplit, quote
 from aiohttp import web, ClientSession, ClientTimeout, WSMsgType, TCPConnector
 from playwright.async_api import async_playwright, TimeoutError as BrowserTimeout, Error as BrowserError
 from config import get_profile
+from artifacts import ArtifactStore
+from context_window import bounded_history, truncate_text
 from diagnostics import Doctor
-from model_providers import ARC_ENDPOINT, build_provider
+from errors import classify_error
+from jobs import JobSpec, SlurmBackend, SshCommandGateway
+from model_providers import ARC_ENDPOINT, ModelCatalog, build_provider
 from ood import OODBrowserAdapter
+from protocol import CommandEnvelope, PROTOCOL_VERSION, ReplayCache
+from security import redact_text
+from services import SshTunnel, VllmServiceManager, VllmServiceSpec
 from state import AppState, AppStateMachine, InvalidTransition
+from version import BUILD, VERSION
 from workspace import JupyterWorkspace
 
 ROOT = Path(__file__).parent
@@ -17,8 +25,6 @@ TOKEN = secrets.token_urlsafe(32)
 PORT = int(os.environ.get('ARC_CHAT_PORT', '8765'))
 if not (1024 <= PORT <= 65535):
     raise ValueError('ARC_CHAT_PORT must be between 1024 and 65535.')
-BUILD = '2026.09.17.9'
-PROTOCOL_VERSION = 1
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_PATH_CHARS = 4096
 MAX_UPLOAD_NAME_CHARS = 255
@@ -96,7 +102,7 @@ def validated_upload_name(name):
     return name
 
 class Bridge:
-    def __init__(self):
+    def __init__(self, *, enable_recovery=False):
         self.context = self.browser = self.pw = self.http = None
         self.ood_page = None
         self.jupyter_page = None
@@ -111,8 +117,16 @@ class Bridge:
         self.input_content = None
         self.busy = False
         self.key = ''
+        self.secret_values = set()
         self.clients = set()
+        self.replay = ReplayCache()
+        self.inflight_requests = set()
+        self.artifacts = ArtifactStore()
+        self.vllm_service = None
+        self.vllm_tunnel = None
+        self.last_job_id = ''
         self.build = BUILD
+        self.version = VERSION
         self.protocol_version = PROTOCOL_VERSION
         self.model_config = {'provider': 'arc', 'endpoint': ARC_ENDPOINT, 'model': 'gpt-oss-120b'}
         self.state_machine = AppStateMachine()
@@ -125,6 +139,72 @@ class Bridge:
             self.profile_error = str(exc)
         self.ood = OODBrowserAdapter(self)
         self.workspace = JupyterWorkspace(self)
+        self.recovery_path = self._recovery_path() if enable_recovery else None
+        self.recovery_metadata = self._load_recovery_state() if enable_recovery else {}
+
+    @staticmethod
+    def _recovery_path():
+        explicit = os.environ.get('ARC_CHAT_RECOVERY_STATE')
+        if explicit:
+            return Path(explicit).expanduser()
+        session = os.environ.get('ARC_CHAT_STATE')
+        if session:
+            return Path(session).expanduser().with_name('recovery.json')
+        if os.name == 'nt':
+            root = Path(os.environ.get('LOCALAPPDATA') or Path.home() / 'AppData' / 'Local') / 'ARC Chat'
+        elif __import__('platform').system() == 'Darwin':
+            root = Path.home() / 'Library' / 'Application Support' / 'ARC Chat'
+        else:
+            root = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local' / 'state') / 'arc-chat'
+        return root / 'recovery.json'
+
+    def _load_recovery_state(self):
+        if self.recovery_path is None:
+            return {}
+        try:
+            value = json.loads(self.recovery_path.read_text(encoding='utf-8'))
+            if not isinstance(value, dict) or value.get('version') != 1:
+                return {}
+            return {k:value.get(k) for k in ('version','build','app_version','profile','workspace_base','notebook_path','session_id','job_id','saved_at')}
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return {}
+
+    def persist_recovery_state(self):
+        if self.recovery_path is None:
+            return
+        payload = {
+            'version': 1,
+            'build': self.build,
+            'app_version': self.version,
+            'profile': self.profile.id,
+            'workspace_base': self.base,
+            'notebook_path': self.notebook_path,
+            'session_id': self.session,
+            'job_id': self.last_job_id,
+            'saved_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        self.recovery_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.recovery_path.with_name(self.recovery_path.name+'.tmp')
+        fd = os.open(temporary, os.O_WRONLY|os.O_CREAT|os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+                json.dump(payload, stream)
+            os.replace(temporary, self.recovery_path)
+            self.recovery_metadata = payload
+        finally:
+            if temporary.exists(): temporary.unlink()
+
+    def remember_secret(self, value):
+        if isinstance(value, str) and len(value) >= 4:
+            self.secret_values.add(value)
+
+    def redacted(self, value):
+        values = set(self.secret_values)
+        if self.key:
+            values.add(self.key)
+        if self.vllm_service and self.vllm_service.api_key:
+            values.add(self.vllm_service.api_key)
+        return redact_text(value, values)
 
     async def set_state(self, target, reason='', *, force=False):
         try:
@@ -138,6 +218,7 @@ class Bridge:
 
     def persist_state(self):
         """Persist non-secret session metadata only when the launcher requests it."""
+        self.persist_recovery_state()
         target = os.environ.get('ARC_CHAT_STATE')
         if not target:
             return
@@ -145,6 +226,7 @@ class Bridge:
             'url': f'http://127.0.0.1:{PORT}/#'+TOKEN,
             'pid': os.getpid(),
             'build': self.build,
+            'app_version': self.version,
             'profile': self.profile.id,
             'state': self.state_machine.state.value,
             'notebook_path': self.notebook_path,
@@ -346,6 +428,27 @@ class Bridge:
         if not self.context: raise ValueError('Open ARC and log in first.')
         if not url: url = await self.discover_jupyter()
         self.base = base_url(url)
+        recovery = self.recovery_metadata
+        recovered_path = recovery.get('notebook_path') if recovery.get('workspace_base') == self.base else ''
+        if recovered_path:
+            try:
+                recovered_path = remote_path(recovered_path, allow_empty=False)
+                sessions = await self.api('GET','api/sessions')
+                prior = next((item for item in sessions if item.get('path') == recovered_path and item.get('kernel',{}).get('id')), None)
+                if prior:
+                    notebook = await self.api('GET','api/contents/'+quote(recovered_path,safe='/'))
+                    self.notebook_path = recovered_path
+                    self.cells = list(notebook.get('content',{}).get('cells',[]))
+                    self.session, self.kernel = prior['id'], prior['kernel']['id']
+                    await self.open_channel()
+                    self.history=[]; self.pending=None
+                    await self.set_state(AppState.WORKSPACE_READY, 'Recovered the prior Jupyter kernel after helper restart.', force=True)
+                    self.persist_state()
+                    return 'Recovered the prior Jupyter kernel and notebook after reauthentication. No code was replayed.'
+            except Exception:
+                # Recovery is opportunistic. A stale record must never block a
+                # normal fresh attach after the user has reauthenticated.
+                self.session=self.kernel=None
         specs = await self.api('GET','api/kernelspecs')
         if kernel_name not in specs['kernelspecs']:
             raise ValueError('Available kernels: '+', '.join(specs['kernelspecs']))
@@ -489,11 +592,20 @@ class Bridge:
         if not self.kernel: raise ValueError('Attach a Jupyter session first.')
         if self.pending: raise ValueError('Run or reject the proposed code first.')
         endpoint = data['endpoint'].rstrip('/')
-        self.key=data['key']
+        provider_name = data.get('provider', 'custom')
+        if provider_name == 'managed':
+            if not self.vllm_service:
+                raise ValueError('Start a managed vLLM service before using the managed provider.')
+            if not self.vllm_tunnel or not self.vllm_tunnel.process or self.vllm_tunnel.process.returncode is not None:
+                raise ValueError('Start the SSH tunnel before using the managed vLLM provider.')
+            self.key = self.vllm_service.api_key
+            endpoint = self.vllm_service.local_endpoint(self.vllm_tunnel.local_port)
+        else:
+            self.key=data['key']
         if not self.key: raise ValueError('Enter your own API key.')
+        self.remember_secret(self.key)
         model = str(data.get('model', '')).strip()
         if not model: raise ValueError('Choose a model that supports tool calling.')
-        provider_name = data.get('provider', 'custom')
         advanced = bool(data.get('advanced', self.profile.advanced_mode))
         if not self.profile.allows_model(provider_name, model, advanced):
             allowed = ', '.join(sorted(self.profile.allowed_provider_names(advanced)))
@@ -501,7 +613,7 @@ class Bridge:
         if provider_name == 'arc' and endpoint != ARC_ENDPOINT:
             raise ValueError('Virginia Tech ARC models must use the configured ARC endpoint.')
         new_user = {'role':'user','content':data['text']} if data.get('text') else None
-        request_history = self.history + ([new_user] if new_user else [])
+        request_history = bounded_history(self.history + ([new_user] if new_user else []))
         system = ('You are a Python research assistant using a persistent remote Jupyter kernel on VT ARC. '
             'Use run_python for computation and file work. User reviews every call. Never claim unobserved results. '
             'Use getpass.getpass for secrets; never ask for secrets in chat or print them. '
@@ -536,6 +648,57 @@ class Bridge:
         if self.pending: await self.emit('proposal',code=self.pending['code'])
         return 'Review proposed code.' if self.pending else 'Ready.'
 
+    def slurm_backend(self, d):
+        username = str(d.get('arc_user', '')).strip()
+        host = str(d.get('login_host', 'falcon2.arc.vt.edu')).strip() or 'falcon2.arc.vt.edu'
+        return SlurmBackend(SshCommandGateway(username, host))
+
+    def job_spec(self, d):
+        account = str(d.get('job_account') or self.profile.resolved_allocation() or '').strip()
+        return JobSpec(
+            account=account,
+            command=str(d.get('job_command', '')).strip(),
+            partition=str(d.get('job_partition', 'l40s_normal_q')).strip(),
+            walltime=str(d.get('job_walltime', '01:00:00')).strip(),
+            cpus_per_task=int(d.get('job_cpus', 8)),
+            gpus=int(d.get('job_gpus', 0)),
+            gpu_type=str(d.get('job_gpu_type', 'l40s')).strip(),
+            memory_gb=int(d['job_memory']) if str(d.get('job_memory', '')).strip() else None,
+            qos=str(d.get('job_qos', '')).strip(),
+            name=str(d.get('job_name', 'arc-chat')).strip(),
+        )
+
+    def vllm_spec(self, d):
+        account = str(d.get('job_account') or self.profile.resolved_allocation() or '').strip()
+        return VllmServiceSpec(
+            account=account,
+            model_path=str(d.get('vllm_model_path', '')).strip(),
+            served_model_name=str(d.get('vllm_model', '')).strip(),
+            gpus=int(d.get('vllm_gpus', 2)),
+            cpus=int(d.get('vllm_cpus', 32)),
+            max_model_len=int(d.get('vllm_context', 32768)),
+            port=int(d.get('vllm_port', 8000)),
+            walltime=str(d.get('job_walltime', '1-00:00:00')).strip(),
+            partition=str(d.get('job_partition', 'l40s_normal_q')).strip(),
+            gpu_type=str(d.get('job_gpu_type', 'l40s')).strip(),
+            tool_call_parser=str(d.get('vllm_tool_parser', 'openai')).strip(),
+            reasoning_parser=str(d.get('vllm_reasoning_parser', '')).strip(),
+        )
+
+    def service_public(self):
+        service = self.vllm_service
+        if not service:
+            return None
+        return {
+            'job_id': service.job_id,
+            'model': service.model,
+            'port': service.port,
+            'node': service.node,
+            'state': service.state,
+            'endpoint': service.local_endpoint(self.vllm_tunnel.local_port if self.vllm_tunnel else service.port) if self.vllm_tunnel else '',
+            'tunnel': bool(self.vllm_tunnel and self.vllm_tunnel.process and self.vllm_tunnel.process.returncode is None),
+        }
+
     async def dispatch(self, action, d):
         if action=='quit':
             asyncio.get_running_loop().call_later(1,os.kill,os.getpid(),signal.SIGTERM)
@@ -557,15 +720,106 @@ class Bridge:
             await self.emit('doctor', report=report)
             return ('Full diagnostics ready. The explicit remote checks may have created one temporary file and one smoke-test cell, both user-visible.' if d.get('full') else
                     'Diagnostics ready. No credentials, cookies, chat content, or notebook contents were included.')
+        if action=='models':
+            provider_name=str(d.get('provider','arc')).strip()
+            if provider_name=='managed':
+                if not self.vllm_service: raise ValueError('No managed vLLM service is tracked.')
+                items=[{'id':self.vllm_service.model,'provider':'managed','capabilities':['chat','tool_calling'],'context_tokens':None,'concurrency':None,'reasoning_effort':''}]
+            else:
+                key=str(d.get('key',''))
+                if not key: raise ValueError('Enter the provider API key before refreshing its model catalog.')
+                self.remember_secret(key)
+                endpoint=str(d.get('endpoint','')).rstrip('/')
+                if provider_name=='arc' and endpoint!=ARC_ENDPOINT:
+                    raise ValueError('Virginia Tech ARC models must use the configured ARC endpoint.')
+                catalog=await ModelCatalog.discover(self.http,endpoint,key,provider='arc_shared' if provider_name=='arc' else provider_name)
+                items=[entry.__dict__ for entry in catalog.entries]
+            await self.emit('models',items=items)
+            return f'Model catalog refreshed ({len(items)} model(s)).'
+        if action=='artifacts':
+            await self.emit('artifacts', items=[item.__dict__ for item in self.artifacts.list()])
+            return 'Artifact registry refreshed.'
+        if action=='job_preview':
+            spec = self.job_spec(d)
+            await self.emit('job_preview', script=spec.script(), spec=spec.public_dict())
+            return 'Slurm script preview ready. Review it before submitting.'
+        if action=='job_submit':
+            backend = self.slurm_backend(d)
+            spec = self.job_spec(d)
+            job_id = await backend.submit(spec)
+            self.last_job_id = job_id
+            self.persist_recovery_state()
+            await self.emit('job', item={'job_id':job_id, 'state':'SUBMITTED', 'name':spec.name})
+            return f'Submitted Slurm job {job_id}. No compute command was run on the login node.'
+        if action=='job_list':
+            items = await self.slurm_backend(d).list_active()
+            await self.emit('jobs', items=items)
+            return f'Found {len(items)} active/pending Slurm job(s).'
+        if action=='job_status':
+            item = await self.slurm_backend(d).status(str(d.get('job_id', '')).strip())
+            await self.emit('job', item=item)
+            return f"Job {item['job_id']}: {item['state']}."
+        if action=='job_logs':
+            job_id = str(d.get('job_id', '')).strip()
+            text = await self.slurm_backend(d).logs(job_id)
+            await self.emit('job_logs', job_id=job_id, text=truncate_text(text, 64000))
+            return f'Loaded recent stdout for job {job_id}.'
+        if action=='job_cancel':
+            job_id = str(d.get('job_id', '')).strip()
+            await self.slurm_backend(d).cancel(job_id)
+            return f'Cancelled Slurm job {job_id}.'
+        if action=='vllm_preview':
+            spec = self.vllm_spec(d)
+            preview_key='preview-secret-0000000000000000'
+            script = spec.job_spec(api_key=preview_key).script().replace(preview_key, '<generated-secret>')
+            await self.emit('job_preview', script=script, spec={'kind':'vllm','model':spec.served_model_name,'model_path':spec.model_path})
+            return 'vLLM Slurm preview ready. The API key will be generated only when you submit.'
+        if action=='vllm_start':
+            if self.vllm_service and self.vllm_service.state not in {'CANCELLED','COMPLETED','FAILED','TIMEOUT'}:
+                raise ValueError('A managed vLLM service is already tracked. Stop it before starting another.')
+            manager = VllmServiceManager(self.slurm_backend(d))
+            self.vllm_service = await manager.start(self.vllm_spec(d))
+            self.last_job_id = self.vllm_service.job_id
+            self.persist_recovery_state()
+            self.remember_secret(self.vllm_service.api_key)
+            await self.emit('service', item=self.service_public())
+            return f'vLLM job {self.vllm_service.job_id} submitted. Refresh until it is RUNNING, then start the SSH tunnel.'
+        if action=='vllm_refresh':
+            if not self.vllm_service: raise ValueError('No managed vLLM service is tracked.')
+            self.vllm_service = await VllmServiceManager(self.slurm_backend(d)).refresh(self.vllm_service)
+            await self.emit('service', item=self.service_public())
+            return f'vLLM job {self.vllm_service.job_id}: {self.vllm_service.state}.'
+        if action=='vllm_tunnel':
+            if not self.vllm_service or not self.vllm_service.node:
+                raise ValueError('The vLLM job must be RUNNING on a known compute node before starting a tunnel.')
+            if self.vllm_tunnel:
+                await self.vllm_tunnel.stop()
+            self.vllm_tunnel = SshTunnel(
+                str(d.get('arc_user', '')).strip(), self.vllm_service.node, self.vllm_service.port,
+                local_port=int(d.get('vllm_local_port') or self.vllm_service.port),
+                login_host=str(d.get('login_host', 'falcon2.arc.vt.edu')).strip() or 'falcon2.arc.vt.edu',
+            )
+            await self.vllm_tunnel.start()
+            self.key = self.vllm_service.api_key
+            self.model_config = {'provider':'managed','endpoint':self.vllm_service.local_endpoint(self.vllm_tunnel.local_port),'model':self.vllm_service.model}
+            await self.emit('service', item=self.service_public())
+            return 'SSH tunnel started. ARC Chat can now use the managed vLLM endpoint through localhost.'
+        if action=='vllm_stop':
+            if not self.vllm_service: raise ValueError('No managed vLLM service is tracked.')
+            if self.vllm_tunnel:
+                await self.vllm_tunnel.stop(); self.vllm_tunnel=None
+            await VllmServiceManager(self.slurm_backend(d)).stop(self.vllm_service)
+            await self.emit('service', item=self.service_public())
+            return f'Cancelled vLLM Slurm job {self.vllm_service.job_id} and stopped its local tunnel.'
         if action=='chat': return await self.chat(d)
         if action=='run':
             pending=self.pending
             if pending and d['code']!=pending['code']: raise ValueError('Reject the proposal before running edited code manually.')
             result=await self.workspace.execute(d['code'])
             if pending:
-                self.history.append({'role':'tool','tool_call_id':pending['id'],'content':result})
+                self.history.append({'role':'tool','tool_call_id':pending['id'],'content':truncate_text(result)})
                 self.pending=None
-            else: self.history.append({'role':'user','content':'I ran this Python:\n'+d['code']+'\nOutput:\n'+result})
+            else: self.history.append({'role':'user','content':truncate_text('I ran this Python:\n'+d['code']+'\nOutput:\n'+result)})
             await self.emit('proposal_done')
             return 'Finished and saved. Choose Continue to send outputs to the model.'
         if action=='reject':
@@ -583,6 +837,8 @@ class Bridge:
             validated_upload(content)
             dest='upload-'+uuid.uuid4().hex[:6]+'-'+name
             await self.api('PUT','api/contents/'+quote(dest),dict(type='file',format='base64',content=content))
+            artifact = self.artifacts.register(dest, workspace=self.session or 'arc-jupyter', created_by='upload')
+            await self.emit('artifact', item=artifact.__dict__)
             return 'Uploaded as '+dest
         if action=='download':
             path=remote_path(d.get('path',''),allow_empty=False)
@@ -596,7 +852,7 @@ class Bridge:
         if action=='shutdown': return await self.workspace.stop()
         raise ValueError('Unknown action.')
 
-bridge=Bridge()
+bridge=Bridge(enable_recovery=__name__=='__main__')
 @web.middleware
 async def guard(request, handler):
     if request.host != f'127.0.0.1:{PORT}': raise web.HTTPForbidden()
@@ -613,22 +869,41 @@ async def socket(request):
     await ws.prepare(request)
     bridge.clients.add(ws)
     async def work(d):
+        request_id=d.get('_request_id','')
+        cached=bridge.replay.get(request_id) if request_id else None
+        if cached:
+            await bridge.emit(cached['type'], **{k:v for k,v in cached.items() if k!='type'})
+            return
+        if request_id and request_id in bridge.inflight_requests:
+            await bridge.emit('status',text='That request is already in progress.',request_id=request_id,terminal=False)
+            return
+        if request_id:
+            bridge.inflight_requests.add(request_id)
         bridge.busy=True
         await bridge.emit('busy',value=True)
         try:
-            await bridge.emit('status',text=await bridge.dispatch(d['action'],d))
+            text=await bridge.dispatch(d['action'],d)
+            result={'type':'status','text':text,'request_id':request_id,'terminal':True}
+            if request_id: bridge.replay.put(request_id,result)
+            await bridge.emit('status',text=text,request_id=request_id,terminal=True)
         except Exception as e:
             # Preserve actionable/recoverable states established by the failing
             # operation.  A transient login, model, or Jupyter failure should
             # not destroy the state needed for a safe retry.
+            info=classify_error(e,redactor=bridge.redacted)
             if bridge.state_machine.state not in {
                 AppState.READY_LOCAL, AppState.AUTH_REQUIRED, AppState.ARC_READY,
                 AppState.WORKSPACE_READY, AppState.INPUT_REQUIRED,
                 AppState.RECOVERING, AppState.DEGRADED,
             }:
-                await bridge.set_state(AppState.ERROR, str(e), force=True)
-            await bridge.emit('error',text=str(e).replace(bridge.key,'[redacted]') if bridge.key else str(e))
-        finally: bridge.busy=False; await bridge.emit('busy',value=False)
+                await bridge.set_state(AppState.ERROR, info.message, force=True)
+            text=info.message
+            result={'type':'error','text':text,'code':info.code,'recovery':info.recovery,'request_id':request_id,'terminal':True}
+            if request_id: bridge.replay.put(request_id,result)
+            await bridge.emit('error',text=text,code=info.code,recovery=info.recovery,request_id=request_id,terminal=True)
+        finally:
+            if request_id: bridge.inflight_requests.discard(request_id)
+            bridge.busy=False; await bridge.emit('busy',value=False)
     tasks=set()
     try:
         await ws.send_json({'type':'status','text':f'Helper connected (build {bridge.build}). '+('Kernel remains attached.' if bridge.kernel else 'Open ARC to begin.')})
@@ -644,10 +919,19 @@ async def socket(request):
                                 'display':bridge.state_machine.state.value.replace('_',' ').title(),
                                 'profile':bridge.profile.public_dict(),
                                 'profile_error':bridge.profile_error})
+        if bridge.recovery_metadata.get('notebook_path') or bridge.recovery_metadata.get('job_id'):
+            await ws.send_json({'type':'recovery',
+                                'notebook_path':bridge.recovery_metadata.get('notebook_path') or '',
+                                'job_id':bridge.recovery_metadata.get('job_id') or ''})
         async for packet in ws:
             if packet.type!=WSMsgType.TEXT: continue
             try:
-                d=json.loads(packet.data)
+                envelope=CommandEnvelope.parse(packet.data)
+                d={**envelope.payload,'action':envelope.action,'_request_id':envelope.id}
+                cached=bridge.replay.get(envelope.id)
+                if cached:
+                    await ws.send_json(cached)
+                    continue
                 if d['action']=='input':
                     if not bridge.input_header: raise ValueError('No input prompt is waiting.')
                     # Claim the prompt before awaiting network I/O so two open
@@ -664,9 +948,20 @@ async def socket(request):
                         raise
                     await bridge.emit('input_done')
                     await bridge.set_state(AppState.EXECUTING, 'Python input submitted.', force=True)
+                    result={'type':'status','text':'Python input submitted.','request_id':envelope.id,'terminal':True}
+                    bridge.replay.put(envelope.id,result)
+                    await bridge.emit('status',text=result['text'],request_id=envelope.id,terminal=True)
                 elif d['action']=='interrupt':
                     if bridge.kernel: await bridge.api('POST',f'api/kernels/{bridge.kernel}/interrupt')
-                elif bridge.busy: raise ValueError('Wait for the current action, or interrupt Python.')
+                    result={'type':'status','text':'Interrupt requested.','request_id':envelope.id,'terminal':True}
+                    bridge.replay.put(envelope.id,result)
+                    await bridge.emit('status',text=result['text'],request_id=envelope.id,terminal=True)
+                elif bridge.busy:
+                    if envelope.id in bridge.inflight_requests:
+                        await ws.send_json({'type':'status','text':'That request is already in progress.',
+                                            'request_id':envelope.id,'terminal':False})
+                        continue
+                    raise ValueError('Wait for the current action, or interrupt Python.')
                 else:
                     # Set immediately to prevent overlapping messages before the task runs.
                     bridge.busy=True
@@ -676,7 +971,8 @@ async def socket(request):
                 # not evidence that the ARC/Jupyter session itself became bad.
                 # Preserve the current recoverable state so a human double-click
                 # or stale browser event cannot poison an otherwise healthy app.
-                await bridge.emit('error',text=str(e).replace(bridge.key,'[redacted]') if bridge.key else str(e))
+                info=classify_error(e,redactor=bridge.redacted)
+                await bridge.emit('error',text=info.message,code=info.code,recovery=info.recovery)
     finally:
         bridge.clients.discard(ws)
         # Keep execution alive when the UI disconnects; never replay code automatically.

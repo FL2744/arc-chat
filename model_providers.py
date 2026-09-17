@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import json
 import random
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
@@ -19,10 +20,11 @@ OPENAI_ENDPOINT = "https://api.openai.com/v1"
 
 class EndpointPolicy:
     @staticmethod
-    def validate(endpoint: str, *, allow_custom: bool = True) -> str:
+    def validate(endpoint: str, *, allow_custom: bool = True, allow_loopback_http: bool = False) -> str:
         value = endpoint.rstrip("/")
         parsed = urlsplit(value)
-        if parsed.scheme != "https":
+        loopback_http = allow_loopback_http and parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+        if parsed.scheme != "https" and not loopback_http:
             raise ValueError("Model API URL must use HTTPS.")
         if not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("Model API URL must contain a public HTTPS host without embedded credentials.")
@@ -35,13 +37,13 @@ class EndpointPolicy:
         host = parsed.hostname.lower().rstrip(".")
         if parsed.query or parsed.fragment:
             raise ValueError("Model API URL must not contain a query string or fragment.")
-        if host in {"localhost", "localhost.localdomain"} or host.endswith((".local", ".localhost", ".internal", ".home.arpa")):
+        if not loopback_http and (host in {"localhost", "localhost.localdomain"} or host.endswith((".local", ".localhost", ".internal", ".home.arpa"))):
             raise ValueError("Model API URL cannot target a local host.")
         try:
             address = ipaddress.ip_address(host)
         except ValueError:
             address = None
-        if address and (not address.is_global or address.is_multicast or address.is_unspecified or address.is_loopback or address.is_link_local):
+        if address and not loopback_http and (not address.is_global or address.is_multicast or address.is_unspecified or address.is_loopback or address.is_link_local):
             raise ValueError("Model API URL cannot target a non-global IP address.")
         # Reject ambiguous numeric host spellings (for example integer/hex IPv4)
         # that some resolvers reinterpret as local addresses after this parser.
@@ -65,13 +67,17 @@ class ModelCatalogEntry:
     id: str
     provider: str
     capabilities: tuple[str, ...] = ("tool_calling",)
+    context_tokens: int | None = None
+    concurrency: int | None = None
+    reasoning_effort: str = ""
 
 
 FALLBACK_CATALOG = (
-    ModelCatalogEntry("gpt-oss-120b", "arc_shared"),
-    ModelCatalogEntry("DeepSeek-V4.1-Flash", "arc_shared"),
-    ModelCatalogEntry("GLM-5.3", "arc_shared"),
-    ModelCatalogEntry("Kimi-K3", "arc_shared"),
+    ModelCatalogEntry("gpt-oss-120b", "arc_shared", ("chat", "tool_calling", "reasoning"), 131072, 10, "medium"),
+    ModelCatalogEntry("GLM-5.3", "arc_shared", ("chat", "tool_calling", "reasoning"), 131072, 4, "max"),
+    ModelCatalogEntry("Kimi-K3", "arc_shared", ("chat", "tool_calling", "reasoning", "vision"), 131072, 3, "max"),
+    ModelCatalogEntry("DeepSeek-V4.1-Flash", "arc_shared", ("chat", "tool_calling", "reasoning", "vision"), 524288, 10, "high"),
+    ModelCatalogEntry("Qwen3-Embedding-4B", "arc_shared", ("embeddings",), 8192, 4),
 )
 
 
@@ -82,6 +88,39 @@ class ModelCatalog:
     def ids(self, provider: str | None = None) -> list[str]:
         return [entry.id for entry in self.entries if provider is None or entry.provider == provider]
 
+    def get(self, model_id: str) -> ModelCatalogEntry | None:
+        return next((entry for entry in self.entries if entry.id == model_id), None)
+
+    @classmethod
+    async def discover(cls, http, endpoint: str, key: str, *, provider: str = "arc_shared") -> "ModelCatalog":
+        """Use OpenAI-compatible model discovery when available, else fallback.
+
+        Discovery only establishes model IDs. Capability/context metadata is
+        retained from the documented fallback where the ID is known.
+        """
+        endpoint = EndpointPolicy.validate(endpoint)
+        try:
+            async with http.get(
+                endpoint + "/models",
+                headers={"Authorization": "Bearer " + key},
+                timeout=ClientTimeout(total=15),
+                allow_redirects=False,
+            ) as response:
+                if response.status >= 400:
+                    return cls()
+                payload = await response.json()
+        except (ClientConnectionError, OSError, asyncio.TimeoutError, ValueError, TypeError):
+            return cls()
+        values = payload.get("data", []) if isinstance(payload, Mapping) else []
+        known = {entry.id: entry for entry in FALLBACK_CATALOG}
+        entries = []
+        for item in values:
+            model_id = item.get("id") if isinstance(item, Mapping) else None
+            if not isinstance(model_id, str) or not model_id.strip():
+                continue
+            entries.append(known.get(model_id) or ModelCatalogEntry(model_id, provider, ("chat",)))
+        return cls(tuple(entries) or FALLBACK_CATALOG)
+
 
 class OpenAICompatibleProvider:
     """Transport for an OpenAI-compatible chat-completions endpoint.
@@ -91,9 +130,9 @@ class OpenAICompatibleProvider:
     model tool call cannot be duplicated by this layer.
     """
 
-    def __init__(self, http, endpoint: str, key: str, *, max_attempts: int = 3, sleep=asyncio.sleep):
+    def __init__(self, http, endpoint: str, key: str, *, max_attempts: int = 3, sleep=asyncio.sleep, allow_loopback_http: bool = False):
         self.http = http
-        self.endpoint = EndpointPolicy.validate(endpoint)
+        self.endpoint = EndpointPolicy.validate(endpoint, allow_loopback_http=allow_loopback_http)
         self.key = key
         self.max_attempts = max(1, max_attempts)
         self.sleep = sleep
@@ -116,6 +155,13 @@ class OpenAICompatibleProvider:
                     if response.status not in {429, 500, 502, 503, 504} or attempt + 1 >= self.max_attempts:
                         raise RuntimeError(f"Model API HTTP {response.status}: {text}")
                     retry_after = self._retry_after(getattr(response, "headers", {}))
+                    if retry_after is None and response.status == 429:
+                        try:
+                            body = json.loads(text)
+                            error = body.get("error", {}) if isinstance(body, Mapping) else {}
+                            retry_after = float(error.get("retry_after_s")) if error.get("retry_after_s") is not None else None
+                        except (ValueError, TypeError, AttributeError):
+                            retry_after = None
                     await self.sleep(min(30.0, retry_after if retry_after is not None else delay + random.uniform(0, 0.25)))
                     delay = min(30.0, delay * 2)
             except RuntimeError:
@@ -156,6 +202,11 @@ class CustomCompatibleProvider(OpenAICompatibleProvider):
     pass
 
 
+class ManagedTunnelProvider(OpenAICompatibleProvider):
+    def __init__(self, http, endpoint: str, key: str, **kwargs):
+        super().__init__(http, endpoint, key, allow_loopback_http=True, **kwargs)
+
+
 def build_provider(http, provider: str, endpoint: str, key: str) -> OpenAICompatibleProvider:
     if provider == "arc":
         return ArcSharedModelProvider(http, key, endpoint)
@@ -163,4 +214,6 @@ def build_provider(http, provider: str, endpoint: str, key: str) -> OpenAICompat
         return OpenAIModelProvider(http, key, endpoint)
     if provider == "custom":
         return CustomCompatibleProvider(http, endpoint, key)
+    if provider == "managed":
+        return ManagedTunnelProvider(http, endpoint, key)
     raise ValueError(f"Unsupported model provider: {provider}")

@@ -17,6 +17,8 @@ DIST = ROOT / "dist"
 COMMON = (
     "helper.py", "arc-chat.html", "requirements.txt", "config.py", "state.py",
     "model_providers.py", "diagnostics.py", "ood.py", "workspace.py",
+    "protocol.py", "security.py", "context_window.py", "artifacts.py",
+    "jobs.py", "services.py", "errors.py", "version.py",
     "profiles.example.json", "README.md",
 )
 

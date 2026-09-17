@@ -92,6 +92,60 @@ class HumanSocketStressTests(unittest.IsolatedAsyncioTestCase):
             release.set()
             helper.bridge = original
 
+    async def test_same_request_id_is_not_dispatched_twice(self):
+        original = helper.bridge
+        b = helper.bridge = Bridge()
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = 0
+
+        async def slow_dispatch(action, data):
+            nonlocal calls
+            calls += 1
+            started.set()
+            await release.wait()
+            return "mutation completed once"
+
+        b.dispatch = slow_dispatch
+        app = web.Application()
+        app.router.add_get("/ws", helper.socket)
+        envelope = {
+            "version": 1,
+            "id": "request-reconnect-0001",
+            "type": "command",
+            "action": "job_submit",
+            "payload": {},
+        }
+        try:
+            async with TestServer(app) as server, ClientSession() as client:
+                first = await client.ws_connect(server.make_url("/ws"))
+                for _ in range(3):
+                    await first.receive_json()
+                await first.send_json(envelope)
+                await asyncio.wait_for(started.wait(), timeout=1)
+                self.assertEqual((await first.receive_json())["type"], "busy")
+                await first.send_json(envelope)
+                duplicate = await asyncio.wait_for(first.receive_json(), timeout=1)
+                self.assertEqual(duplicate["type"], "status")
+                self.assertFalse(duplicate["terminal"])
+                self.assertEqual(duplicate["request_id"], envelope["id"])
+                self.assertEqual(calls, 1)
+
+                release.set()
+                terminal = None
+                for _ in range(4):
+                    event = await asyncio.wait_for(first.receive_json(), timeout=1)
+                    if event.get("request_id") == envelope["id"] and event.get("terminal"):
+                        terminal = event
+                        break
+                self.assertIsNotNone(terminal)
+                self.assertEqual(terminal["text"], "mutation completed once")
+                self.assertEqual(calls, 1)
+                await first.close()
+        finally:
+            release.set()
+            helper.bridge = original
+
     async def test_malformed_client_packet_reports_error_without_destroying_recoverable_state(self):
         original = helper.bridge
         b = helper.bridge = Bridge()
