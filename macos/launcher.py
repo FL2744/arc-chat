@@ -34,7 +34,7 @@ with open(support / 'launcher.log', 'a') as log:
     try:
         # Reuse the installed development runtime on this Mac when available.
         config = json.loads((resources / 'runtime.json').read_text())
-        installed = pathlib.Path(config['existing_runtime'])
+        installed = pathlib.Path(config.get('existing_runtime') or resources / 'runtime')
         python = installed / '.venv/bin/python'
         browsers = installed / '.browsers'
         if not python.exists() or not browsers.exists():

@@ -2,6 +2,12 @@
 
 One self-contained HTML interface plus a local Python browser/Jupyter helper. The helper opens a separate Chromium window for VT login/MFA; no VT passwords are entered into the chatbot. VPN must be enabled using your normal client.
 
+## macOS download
+
+[Download ARC Chat for macOS](https://github.com/FL2744/arc-chat/releases/latest/download/ARC-Chat-macOS.zip) · [Release notes](https://github.com/FL2744/arc-chat/releases/latest)
+
+Unzip the download, move **ARC Chat.app** to Applications, and double-click it. Requires **Python 3.10+** and internet access for first-time dependency and Chromium downloads. This preview is ad-hoc signed, not Apple-notarized; macOS may require explicit approval to open it. VT VPN is still required off campus.
+
 ## Start
 
 To build the macOS wrapper, run `python3 macos/build.py`, then double-click **dist/ARC Chat.app**. No Terminal command is needed. Stop any existing Terminal-launched helper first with Control-C. Use **Quit helper** in the chat to stop the background helper. See `macos/README.md` for app setup details.
