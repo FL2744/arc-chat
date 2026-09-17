@@ -121,9 +121,40 @@ jobs:
         with:
           name: ARC-Chat-source
           path: release
+      - name: Verify release payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -lh release
+          for file in \
+            ARC-Chat-macOS-Portable.zip \
+            ARC-Chat-macOS-Portable.zip.sha256 \
+            ARC-Chat-Windows-Portable.zip \
+            ARC-Chat-Windows-Portable.zip.sha256 \
+            ARC-Chat-macOS.zip \
+            ARC-Chat-macOS.zip.sha256 \
+            ARC-Chat-source.zip \
+            ARC-Chat-source.zip.sha256 \
+            ARC-Chat-Linux.zip \
+            ARC-Chat-Linux.zip.sha256; do
+            test -s "release/$file"
+          done
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           prerelease: true
-          files: release/*
+          preserve_order: true
+          overwrite_files: true
+          fail_on_unmatched_files: true
+          files: |
+            release/ARC-Chat-macOS-Portable.zip
+            release/ARC-Chat-macOS-Portable.zip.sha256
+            release/ARC-Chat-Windows-Portable.zip
+            release/ARC-Chat-Windows-Portable.zip.sha256
+            release/ARC-Chat-macOS.zip
+            release/ARC-Chat-macOS.zip.sha256
+            release/ARC-Chat-source.zip
+            release/ARC-Chat-source.zip.sha256
+            release/ARC-Chat-Linux.zip
+            release/ARC-Chat-Linux.zip.sha256
