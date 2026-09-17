@@ -4,7 +4,7 @@ One self-contained HTML interface plus a local Python browser/Jupyter helper. Th
 
 ## Downloads
 
-[Windows portable](https://github.com/FL2744/arc-chat/releases/download/v0.2.4/ARC-Chat-Windows-Portable.zip) · [macOS portable](https://github.com/FL2744/arc-chat/releases/download/v0.2.4/ARC-Chat-macOS-Portable.zip) · [macOS lightweight bootstrap](https://github.com/FL2744/arc-chat/releases/download/v0.2.4/ARC-Chat-macOS.zip) · [Linux bootstrap](https://github.com/FL2744/arc-chat/releases/download/v0.2.4/ARC-Chat-Linux.zip) · [Release notes](https://github.com/FL2744/arc-chat/releases/tag/v0.2.4)
+[Windows portable](https://github.com/FL2744/arc-chat/releases/download/v0.3.0/ARC-Chat-Windows-Portable.zip) · [macOS portable](https://github.com/FL2744/arc-chat/releases/download/v0.3.0/ARC-Chat-macOS-Portable.zip) · [macOS lightweight bootstrap](https://github.com/FL2744/arc-chat/releases/download/v0.3.0/ARC-Chat-macOS.zip) · [Linux bootstrap](https://github.com/FL2744/arc-chat/releases/download/v0.3.0/ARC-Chat-Linux.zip) · [Release notes](https://github.com/FL2744/arc-chat/releases/tag/v0.3.0)
 
 **Windows:** unzip the whole portable archive and double-click **ARC-Chat.exe** inside the extracted `ARC-Chat` folder. The portable build bundles Python, ARC Chat's dependencies, and the compatible headful Chromium runtime used for visible VT login/MFA. It does not require a separate Python installation or a first-run browser download.
 
