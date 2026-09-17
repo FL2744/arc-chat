@@ -146,22 +146,63 @@ jobs:
             ARC-Chat-Linux.zip.sha256; do
             test -s "release/$file"
           done
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          prerelease: true
-          preserve_order: true
-          overwrite_files: true
-          fail_on_unmatched_files: true
-          files: |
-            release/ARC-Chat-macOS-Portable.zip
-            release/ARC-Chat-macOS-Portable.zip.sha256
-            release/ARC-Chat-Windows-Portable.zip
-            release/ARC-Chat-Windows-Portable.zip.sha256
-            release/ARC-Chat-macOS.zip
-            release/ARC-Chat-macOS.zip.sha256
-            release/ARC-Chat-source.zip
-            release/ARC-Chat-source.zip.sha256
-            release/ARC-Chat-Linux.zip
-            release/ARC-Chat-Linux.zip.sha256
+      - name: Publish GitHub release with per-asset retries
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+
+          retry() {
+            local attempt=1
+            local max_attempts=5
+            until "$@"; do
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "command failed after ${attempt} attempts: $*" >&2
+                return 1
+              fi
+              sleep_seconds=$((attempt * 5))
+              echo "retry ${attempt}/${max_attempts} in ${sleep_seconds}s: $*" >&2
+              sleep "$sleep_seconds"
+              attempt=$((attempt + 1))
+            done
+          }
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            retry gh release edit "$tag" --prerelease --title "$tag"
+          else
+            if ! retry gh release create "$tag" --verify-tag --prerelease --generate-notes --title "$tag"; then
+              # A transient view failure can race an already-created partial release.
+              retry gh release edit "$tag" --prerelease --title "$tag"
+            fi
+          fi
+
+          # Publish small assets first so a large portable retry never leaves the
+          # whole release empty. Each asset is independently resumable/clobberable.
+          files=(
+            ARC-Chat-macOS.zip
+            ARC-Chat-macOS.zip.sha256
+            ARC-Chat-source.zip
+            ARC-Chat-source.zip.sha256
+            ARC-Chat-Linux.zip
+            ARC-Chat-Linux.zip.sha256
+            ARC-Chat-macOS-Portable.zip.sha256
+            ARC-Chat-Windows-Portable.zip.sha256
+            ARC-Chat-macOS-Portable.zip
+            ARC-Chat-Windows-Portable.zip
+          )
+
+          for file in "${files[@]}"; do
+            echo "Publishing $file"
+            retry gh release upload "$tag" "release/$file" --clobber
+          done
+
+          # Verify the user-facing public download routes without downloading the
+          # large payload bodies.
+          for file in "${files[@]}"; do
+            url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/${file}"
+            echo "Verifying $url"
+            curl --fail --silent --show-error --location --head \
+              --retry 5 --retry-all-errors --retry-delay 3 "$url" >/dev/null
+          done
