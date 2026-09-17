@@ -44,7 +44,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Validate macOS build script syntax
-        run: python -m py_compile macos/build.py macos/launcher.py distribution/build_bundles.py
+        run: python -m py_compile macos/build.py macos/launcher.py distribution/build_bundles.py distribution/build_portable.py distribution/pyinstaller_runtime.py distribution/smoke_portable.py
       - name: Verify packaged Python modules are declared
         shell: bash
         run: |
@@ -57,3 +57,69 @@ jobs:
         run: |
           unzip -l dist/ARC-Chat-Windows.zip
           unzip -l dist/ARC-Chat-Linux.zip
+
+  integration:
+    name: Local Jupyter integration
+    runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/playwright-browsers
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install runtime/integration dependencies
+        run: python -m pip install -r requirements.txt -r requirements-test.txt
+      - name: Install Chromium and Linux browser dependencies
+        run: python -m playwright install --with-deps chromium
+      - name: Run real local Jupyter/UI integration
+        run: python integration_test.py
+
+  portable-windows:
+    name: Self-contained Windows smoke
+    runs-on: windows-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/playwright-browsers
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install build/runtime dependencies
+        run: python -m pip install -r requirements.txt -r requirements-build.txt
+      - name: Install packaged Chromium runtime
+        run: python -m playwright install chromium
+      - name: Build self-contained package
+        run: python distribution/build_portable.py
+      - name: Smoke-test clean packaged launch
+        run: python distribution/smoke_portable.py dist/portable/ARC-Chat
+
+  portable-macos:
+    name: Self-contained macOS smoke
+    runs-on: macos-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/playwright-browsers
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install build/runtime dependencies
+        run: python -m pip install -r requirements.txt -r requirements-build.txt
+      - name: Install packaged Chromium runtime
+        run: python -m playwright install chromium
+      - name: Build self-contained package
+        run: python distribution/build_portable.py
+      - name: Verify macOS app signature
+        run: codesign --verify --deep --strict dist/portable/ARC-Chat.app
+      - name: Smoke-test clean packaged launch
+        run: python distribution/smoke_portable.py dist/portable/ARC-Chat.app

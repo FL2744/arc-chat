@@ -14,8 +14,10 @@ from workspace import JupyterWorkspace
 
 ROOT = Path(__file__).parent
 TOKEN = secrets.token_urlsafe(32)
-PORT = 8765
-BUILD = '2026.09.17.8'
+PORT = int(os.environ.get('ARC_CHAT_PORT', '8765'))
+if not (1024 <= PORT <= 65535):
+    raise ValueError('ARC_CHAT_PORT must be between 1024 and 65535.')
+BUILD = '2026.09.17.9'
 PROTOCOL_VERSION = 1
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_PATH_CHARS = 4096
@@ -703,8 +705,16 @@ if __name__=='__main__':
     url=f'http://127.0.0.1:{PORT}/#'+TOKEN
     print('Opening local ARC Chat. Keep this terminal open. Ctrl-C stops the helper.')
     async def launch(app):
+        if os.environ.get('ARC_CHAT_BROWSER_SMOKE'):
+            smoke_pw = await async_playwright().start()
+            try:
+                smoke_browser = await smoke_pw.chromium.launch(headless=True, channel='chromium')
+                await smoke_browser.close()
+            finally:
+                await smoke_pw.stop()
         if os.environ.get('ARC_CHAT_STATE'):
             bridge.persist_state()
-        asyncio.get_running_loop().call_later(1,webbrowser.open,url)
+        if not os.environ.get('ARC_CHAT_NO_OPEN'):
+            asyncio.get_running_loop().call_later(1,webbrowser.open,url)
     app.on_startup.append(launch)
     web.run_app(app,host='127.0.0.1',port=PORT,access_log=None)

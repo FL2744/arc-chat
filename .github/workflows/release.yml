@@ -13,6 +13,8 @@ jobs:
   macos:
     name: Build macOS preview
     runs-on: macos-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/playwright-browsers
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -20,8 +22,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: pip
+      - name: Install portable build dependencies
+        run: python -m pip install -r requirements.txt -r requirements-build.txt
+      - name: Install packaged Chromium runtime
+        run: python -m playwright install chromium
       - name: Build ARC Chat.app
         run: python macos/build.py
+      - name: Build self-contained macOS package
+        run: python distribution/build_portable.py
+      - name: Verify self-contained macOS signature
+        run: codesign --verify --deep --strict dist/portable/ARC-Chat.app
+      - name: Smoke-test self-contained macOS package
+        run: python distribution/smoke_portable.py dist/portable/ARC-Chat.app
       - name: Create archive and checksum
         run: |
           ditto -c -k --sequesterRsrc --keepParent "dist/ARC Chat.app" ARC-Chat-macOS.zip
@@ -33,6 +46,37 @@ jobs:
           path: |
             ARC-Chat-macOS.zip
             ARC-Chat-macOS.zip.sha256
+            dist/portable/ARC-Chat-macOS-Portable.zip
+            dist/portable/ARC-Chat-macOS-Portable.zip.sha256
+
+  windows:
+    name: Build Windows portable preview
+    runs-on: windows-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/playwright-browsers
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install build/runtime dependencies
+        run: python -m pip install -r requirements.txt -r requirements-build.txt
+      - name: Install packaged Chromium runtime
+        run: python -m playwright install chromium
+      - name: Build self-contained Windows package
+        run: python distribution/build_portable.py
+      - name: Smoke-test self-contained Windows package
+        run: python distribution/smoke_portable.py dist/portable/ARC-Chat
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ARC-Chat-Windows-Portable
+          path: |
+            dist/portable/ARC-Chat-Windows-Portable.zip
+            dist/portable/ARC-Chat-Windows-Portable.zip.sha256
 
   source:
     name: Package source and bootstrap previews
@@ -44,8 +88,7 @@ jobs:
         run: |
           git archive --format=zip --prefix=arc-chat-${GITHUB_REF_NAME}/ -o ARC-Chat-source.zip HEAD
           sha256sum ARC-Chat-source.zip > ARC-Chat-source.zip.sha256
-          python distribution/build_bundles.py
-          cp dist/ARC-Chat-Windows.zip dist/ARC-Chat-Windows.zip.sha256 .
+          python distribution/build_bundles.py Linux
           cp dist/ARC-Chat-Linux.zip dist/ARC-Chat-Linux.zip.sha256 .
       - name: Upload source artifacts
         uses: actions/upload-artifact@v4
@@ -54,14 +97,12 @@ jobs:
           path: |
             ARC-Chat-source.zip
             ARC-Chat-source.zip.sha256
-            ARC-Chat-Windows.zip
-            ARC-Chat-Windows.zip.sha256
             ARC-Chat-Linux.zip
             ARC-Chat-Linux.zip.sha256
 
   publish:
     name: Publish preview release
-    needs: [macos, source]
+    needs: [macos, windows, source]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
@@ -69,6 +110,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ARC-Chat-macOS
+          path: release
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ARC-Chat-Windows-Portable
           path: release
       - name: Download source artifacts
         uses: actions/download-artifact@v4

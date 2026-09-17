@@ -3,6 +3,7 @@ __pycache__/
 .browsers/
 .test-runtime/
 dist/
+build/
 *.app/
 *.zip
 .DS_Store
@@ -11,4 +12,5 @@ dist/
 !.env.example
 session.json
 launcher.log
+portable-smoke-state.json
 preview.png

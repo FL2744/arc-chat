@@ -12,7 +12,7 @@ for name in ('launcher.py','launch.sh'):
 (resources/'runtime.json').write_text(json.dumps({'existing_runtime':str(root)}))
 p=app/'Contents/Info.plist'
 d=plistlib.loads(p.read_bytes())
-d.update(CFBundleIdentifier='edu.research.arc-chat.local',CFBundleName='ARC Chat',CFBundleDisplayName='ARC Chat',CFBundleShortVersionString='0.2.3',NSHighResolutionCapable=True)
+d.update(CFBundleIdentifier='edu.research.arc-chat.local',CFBundleName='ARC Chat',CFBundleDisplayName='ARC Chat',CFBundleShortVersionString='0.2.4',NSHighResolutionCapable=True)
 p.write_bytes(plistlib.dumps(d))
 subprocess.run(['codesign','--force','--deep','--sign','-',str(app)],check=True)
 print(app)
