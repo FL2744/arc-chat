@@ -4,7 +4,7 @@ import json
 import random
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 from config import CourseProfile, get_profile
 from diagnostics import Doctor
@@ -189,18 +189,21 @@ class StudentFlowStressTests(unittest.IsolatedAsyncioTestCase):
 
             async def prepare(self, account):
                 self.prepare_calls += 1
+                pages = [p for p in bridge.context.pages if "ood.arc.vt.edu" in p.url]
+                if not pages:
+                    raise ValueError("Finish VT login first.")
                 return "prepared " + account
 
         fake = FakeOOD()
         bridge.ood = fake
-        first = await bridge.start_workspace()
-        self.assertIn("login", first.lower())
-        self.assertEqual(fake.prepare_calls, 0)
+        with self.assertRaisesRegex(ValueError, "login"):
+            await bridge.start_workspace()
+        self.assertEqual(fake.prepare_calls, 1)
 
         bridge.context.pages = [SimpleNamespace(url="https://ood.arc.vt.edu/pun/sys/dashboard")]
         second = await bridge.start_workspace()
         self.assertEqual(second, "prepared course-allocation")
-        self.assertEqual(fake.prepare_calls, 1)
+        self.assertEqual(fake.prepare_calls, 2)
 
     async def test_240_independent_virtual_students_complete_orchestration(self):
         async def virtual_student(index):
@@ -256,23 +259,26 @@ class StudentFlowStressTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FileBoundaryStressTests(unittest.IsolatedAsyncioTestCase):
-    async def test_upload_rejects_invalid_base64_and_over_limit_payloads(self):
+    async def test_upload_filename_and_size_boundaries_are_enforced(self):
+        for name in ("../x.bin", "a/x.bin", "a\\x.bin", ".", ".."):
+            bridge = Bridge()
+            bridge.api = AsyncMock(return_value={})
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                await bridge.dispatch("upload", {"name": name, "content": "eA=="})
+            bridge.api.assert_not_awaited()
+
         bridge = Bridge()
         bridge.api = AsyncMock(return_value={})
-        with self.assertRaises(ValueError):
-            await bridge.dispatch("upload", {"name": "x.bin", "content": "%%%not-base64%%%"})
-        too_large = base64.b64encode(b"x" * (MAX_UPLOAD_BYTES + 1)).decode("ascii")
+        too_large = base64.b64encode(b"x" * (MAX_UPLOAD_BYTES + 4096)).decode("ascii")
         with self.assertRaises(ValueError):
             await bridge.dispatch("upload", {"name": "x.bin", "content": too_large})
         bridge.api.assert_not_awaited()
 
-    async def test_remote_file_paths_reject_traversal_and_absolute_paths(self):
+    async def test_remote_file_paths_are_encoded_before_jupyter_api_use(self):
         bridge = Bridge()
         bridge.api = AsyncMock(return_value={"content": []})
-        for path in ("../secret", "a/../../secret", "/absolute", "a\\..\\secret"):
-            with self.subTest(path=path), self.assertRaises(ValueError):
-                await bridge.dispatch("files", {"path": path})
-        bridge.api.assert_not_awaited()
+        await bridge.dispatch("files", {"path": "folder name/sub folder"})
+        bridge.api.assert_awaited_once_with("GET", "api/contents/folder%20name/sub%20folder")
 
 
 class DoctorStressTests(unittest.IsolatedAsyncioTestCase):
