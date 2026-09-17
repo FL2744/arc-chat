@@ -35,7 +35,7 @@ jobs:
             ARC-Chat-macOS.zip.sha256
 
   source:
-    name: Package source preview
+    name: Package source and bootstrap previews
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -44,6 +44,9 @@ jobs:
         run: |
           git archive --format=zip --prefix=arc-chat-${GITHUB_REF_NAME}/ -o ARC-Chat-source.zip HEAD
           sha256sum ARC-Chat-source.zip > ARC-Chat-source.zip.sha256
+          python distribution/build_bundles.py
+          cp dist/ARC-Chat-Windows.zip dist/ARC-Chat-Windows.zip.sha256 .
+          cp dist/ARC-Chat-Linux.zip dist/ARC-Chat-Linux.zip.sha256 .
       - name: Upload source artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -51,6 +54,10 @@ jobs:
           path: |
             ARC-Chat-source.zip
             ARC-Chat-source.zip.sha256
+            ARC-Chat-Windows.zip
+            ARC-Chat-Windows.zip.sha256
+            ARC-Chat-Linux.zip
+            ARC-Chat-Linux.zip.sha256
 
   publish:
     name: Publish preview release

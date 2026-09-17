@@ -4,9 +4,11 @@ One self-contained HTML interface plus a local Python browser/Jupyter helper. Th
 
 ## macOS download
 
-[Download ARC Chat for macOS](https://github.com/FL2744/arc-chat/releases/download/v0.2.1/ARC-Chat-macOS.zip) · [Release notes](https://github.com/FL2744/arc-chat/releases/tag/v0.2.1)
+[Download ARC Chat for macOS](https://github.com/FL2744/arc-chat/releases/download/v0.2.2/ARC-Chat-macOS.zip) · [Windows](https://github.com/FL2744/arc-chat/releases/download/v0.2.2/ARC-Chat-Windows.zip) · [Linux](https://github.com/FL2744/arc-chat/releases/download/v0.2.2/ARC-Chat-Linux.zip) · [Release notes](https://github.com/FL2744/arc-chat/releases/tag/v0.2.2)
 
 Unzip the download, move **ARC Chat.app** to Applications, and double-click it. Requires **Python 3.10+** and internet access for first-time dependency and Chromium downloads. This preview is ad-hoc signed, not Apple-notarized; macOS may require explicit approval to open it. VT VPN is still required off campus.
+
+Tagged preview releases also include **ARC-Chat-Windows.zip** and **ARC-Chat-Linux.zip**. The Windows bundle launches by double-clicking **ARC Chat.cmd**; the Linux bundle launches with `./arc-chat`. These bootstrap packages keep the download small and create an isolated Python environment plus Playwright Chromium on first launch, so Python 3.10+ and internet access are still required for first-time setup.
 
 ## Start
 
@@ -104,7 +106,7 @@ Automatic attachment tracks the tab opened by Connect ready session (including p
 
 The helper continuously reads kernel WebSocket messages between code runs to maintain ping/pong. If the connection closes while idle, new execution reconnects to the same existing kernel without clearing variables or history. Busy kernels are preserved and require waiting or interruption; code is never automatically replayed after a mid-execution disconnect.
 
-Recovery from an OOD 502/503/504: check My Interactive Sessions for a reachable running Jupyter job. Connect ready session can switch from a stale server to the newly opened server without deleting the old kernel or files. Disconnect old session clears only local connection references when needed. Switching servers creates a fresh Python workspace; saved files remain on their original filesystem, but in-memory variables are not transferred. Updating the files does not hot-reload a running helper: quit the helper and reopen the app to use build 2026.09.17.5.
+Recovery from an OOD 502/503/504: check My Interactive Sessions for a reachable running Jupyter job. Connect ready session can switch from a stale server to the newly opened server without deleting the old kernel or files. Disconnect old session clears only local connection references when needed. Switching servers creates a fresh Python workspace; saved files remain on their original filesystem, but in-memory variables are not transferred. Updating the files does not hot-reload a running helper: quit the helper and reopen the app to use build 2026.09.17.6.
 
 ## Certificate verification on macOS
 

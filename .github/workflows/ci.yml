@@ -44,10 +44,16 @@ jobs:
         with:
           python-version: '3.12'
       - name: Validate macOS build script syntax
-        run: python -m py_compile macos/build.py macos/launcher.py
+        run: python -m py_compile macos/build.py macos/launcher.py distribution/build_bundles.py
       - name: Verify packaged Python modules are declared
         shell: bash
         run: |
           for file in helper.py config.py state.py model_providers.py diagnostics.py ood.py workspace.py arc-chat.html requirements.txt; do
             test -f "$file"
           done
+      - name: Build Windows and Linux bootstrap bundles
+        run: python distribution/build_bundles.py
+      - name: Inspect bootstrap bundle contents
+        run: |
+          unzip -l dist/ARC-Chat-Windows.zip
+          unzip -l dist/ARC-Chat-Linux.zip

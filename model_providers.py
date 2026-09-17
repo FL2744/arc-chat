@@ -27,17 +27,31 @@ class EndpointPolicy:
         if not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("Model API URL must contain a public HTTPS host without embedded credentials.")
         host = parsed.hostname.lower().rstrip(".")
-        if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
+        if parsed.query or parsed.fragment:
+            raise ValueError("Model API URL must not contain a query string or fragment.")
+        if host in {"localhost", "localhost.localdomain"} or host.endswith((".local", ".localhost", ".internal", ".home.arpa")):
             raise ValueError("Model API URL cannot target a local host.")
         try:
             address = ipaddress.ip_address(host)
         except ValueError:
             address = None
-        if address and (address.is_private or address.is_loopback or address.is_link_local or address.is_reserved or address.is_multicast):
-            raise ValueError("Model API URL cannot target a private or local IP address.")
+        if address and (not address.is_global or address.is_multicast or address.is_unspecified or address.is_loopback or address.is_link_local):
+            raise ValueError("Model API URL cannot target a non-global IP address.")
+        # Reject ambiguous numeric host spellings (for example integer/hex IPv4)
+        # that some resolvers reinterpret as local addresses after this parser.
+        if address is None and (host.isdigit() or re_numeric_host(host)):
+            raise ValueError("Model API URL cannot use an ambiguous numeric host.")
         if not allow_custom and value not in {ARC_ENDPOINT, OPENAI_ENDPOINT}:
             raise ValueError("This course profile only permits the configured model provider.")
         return value
+
+
+def re_numeric_host(host: str) -> bool:
+    lowered = host.lower()
+    if lowered.startswith("0x"):
+        return True
+    labels = lowered.split(".")
+    return bool(labels) and all(label and (label.isdigit() or label.startswith("0x")) for label in labels)
 
 
 @dataclass(frozen=True)
