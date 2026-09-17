@@ -33,8 +33,12 @@ class EndpointPolicy:
             address = ipaddress.ip_address(host)
         except ValueError:
             address = None
-        if address and (address.is_private or address.is_loopback or address.is_link_local or address.is_reserved or address.is_multicast):
-            raise ValueError("Model API URL cannot target a private or local IP address.")
+        # Literal endpoints must be globally routable.  This blocks private,
+        # loopback, link-local, carrier-grade NAT, benchmark, multicast,
+        # reserved, and unspecified address ranges rather than maintaining an
+        # incomplete hand-written list of special cases.
+        if address and not address.is_global:
+            raise ValueError("Model API URL cannot target a non-global IP address.")
         if not allow_custom and value not in {ARC_ENDPOINT, OPENAI_ENDPOINT}:
             raise ValueError("This course profile only permits the configured model provider.")
         return value
