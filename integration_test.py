@@ -55,6 +55,7 @@ async def main():
                     ui=await b.context.new_page();errors=[];ui.on('pageerror',lambda e:errors.append(str(e)))
                     await ui.goto('http://127.0.0.1:8765/#'+helper.TOKEN)
                     await ui.wait_for_function("document.querySelector('#status').textContent.includes('Helper connected')")
+                    await ui.locator('#python-panel > summary').click()
                     await ui.locator('#code').fill('print("UI execution passed")')
                     await ui.locator('#run').click()
                     await ui.wait_for_function("document.querySelector('#status').textContent.includes('Finished and saved')")

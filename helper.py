@@ -286,9 +286,9 @@ class Bridge:
                 host = (urlsplit(page.url).hostname or '').lower()
                 if host == 'ood.arc.vt.edu':
                     await self.set_state(AppState.ARC_READY, 'Existing authenticated ARC tab restored.', force=True)
-                    return 'Existing ARC tab restored. Choose Prepare Jupyter when ready.'
+                    return 'Existing ARC tab restored. Return to ARC Chat and continue setup when ready.'
                 await self.set_state(AppState.AUTH_REQUIRED, 'Use the existing visible browser tab to complete VT login/MFA.', force=True)
-                return 'Existing ARC/login tab restored. Complete login/MFA there, then choose Prepare Jupyter. If the page is blank or stalled, enable VT VPN and reload that tab.'
+                return 'Existing ARC/login tab restored. Complete login/MFA there, then return to ARC Chat and continue. If the page is blank or stalled, enable VT VPN and reload that tab.'
         else:
             page = self.ood_page = await self.context.new_page()
         try:
@@ -303,7 +303,7 @@ class Bridge:
                 await self.set_state(AppState.DEGRADED, 'ARC navigation timed out; the visible tab was preserved.', force=True)
             return ('ARC navigation has not completed. The browser tab is still open: if a VT login/MFA page is visible, continue there. '
                     'If it is blank or cannot connect, enable VT VPN and reload the tab. '
-                    'Also try https://ood.arc.vt.edu/ in your usual browser to check network access. Then choose Prepare Jupyter after signing in.')
+                    'Also try https://ood.arc.vt.edu/ in your usual browser to check network access. Then return to ARC Chat and continue setup.')
         except BrowserError as exc:
             # Keep the same tab so retrying never discards an authentication flow.
             await self.set_state(AppState.DEGRADED, 'ARC browser navigation failed; the visible tab was preserved.', force=True)
@@ -314,7 +314,7 @@ class Bridge:
             await self.set_state(AppState.DEGRADED, f'ARC returned HTTP {response.status}.', force=True)
             return f'ARC returned HTTP {response.status}. Inspect the browser page and check VPN/session access before continuing.'
         await self.set_state(AppState.AUTH_REQUIRED, 'Complete VT login/MFA in the visible browser.', force=True)
-        return 'ARC navigation started. Complete VT login/MFA in the browser, then choose Prepare Jupyter. If the page stalls, check VT VPN and reload it.'
+        return 'ARC navigation started. Complete VT login/MFA in the browser, then return to ARC Chat and continue. If the page stalls, check VT VPN and reload it.'
 
     async def prepare(self, account):
         if not self.context: raise ValueError('Open ARC first.')
@@ -326,27 +326,47 @@ class Bridge:
         if await link.count() == 1:
             await link.click()
             await page.wait_for_load_state('domcontentloaded')
+        account_options = []
+        selected_account = ''
         for label, wanted in [('Cluster', 'Falcon'), ('Account', account)]:
             field = page.get_by_label(re.compile(label, re.I))
             if await field.count() != 1: continue
             options = await field.locator('option').evaluate_all('(xs)=>xs.map(x=>({label:x.textContent,value:x.value}))')
+            if label == 'Account':
+                account_options = [
+                    str(o.get('label') or '').strip() for o in options
+                    if str(o.get('value') or '').strip() and str(o.get('label') or '').strip()
+                ]
             matches = [o for o in options if (wanted.lower() in o['label'].lower() if label=='Cluster' else wanted.strip() == o['label'].strip())]
-            if len(matches)==1: await field.select_option(value=matches[0]['value'])
+            if len(matches)==1:
+                await field.select_option(value=matches[0]['value'])
+                if label == 'Account': selected_account = str(matches[0]['label']).strip()
         await page.bring_to_front()
         await self.set_state(AppState.ARC_READY, 'ARC workspace form is ready for human review.', force=True)
-        return 'Review cluster, account, GPU, and walltime in the browser. Click Launch there. When ready, click Connect to Jupyter there, then Attach here. If the form differs, select the fields manually.'
+        await self.emit('workspace_setup',
+            stage='review' if selected_account else 'allocation',
+            allocation_options=account_options,
+            selected_allocation=selected_account,
+        )
+        if selected_account:
+            return 'ARC workspace form is ready. Review the visible cluster, account, GPU, and walltime, then launch when ready.'
+        return 'ARC workspace form is ready. Choose an allocation you are authorized to use; ARC Chat will keep the selection visible for review before launch.'
 
     async def start_workspace(self):
         """Student-mode entry point using an instructor/course profile."""
         allocation = self.profile.resolved_allocation()
-        if not allocation:
-            raise ValueError(
-                f'Course profile {self.profile.name!r} has no allocation configured. '
-                'An instructor must provide ARC_COURSE_ALLOCATION or a profile file; '
-                'switch to Advanced Mode for manual OOD selection.'
-            )
         if not self.context:
-            await self.ood.open()
+            result = await self.ood.open()
+            # First-run authentication is deliberately visible.  Do not race a
+            # form interaction while the user is completing VT login/MFA.
+            if self.state_machine.state != AppState.ARC_READY:
+                await self.emit('workspace_setup', stage='sign_in')
+                return result
+        pages = [p for p in self.context.pages if urlsplit(p.url).hostname == 'ood.arc.vt.edu']
+        if not pages:
+            result = await self.ood.open()
+            await self.emit('workspace_setup', stage='sign_in')
+            return result
         return await self.ood.prepare(allocation)
 
     async def browser_click(self, action):
@@ -370,7 +390,9 @@ class Bridge:
             if count>1:
                 raise ValueError('Multiple ready Jupyter jobs found. Click the Notebook connection for your intended job in OOD, then choose Attach to Jupyter here.')
             if count==0:
-                raise ValueError('No ready Jupyter connection found on this OOD tab. Wait for the job to be running, or click its connection in OOD, then choose Attach to Jupyter here.')
+                await self.set_state(AppState.JOB_QUEUED, 'ARC is still starting the Jupyter workspace.', force=True)
+                await self.emit('workspace_setup', stage='waiting')
+                return 'Jupyter is still starting in ARC. Nothing failed; Student Mode will keep checking readiness for a short time, and you can also check manually.'
         else:
             candidates=controls(re.compile(r'^Launch$',re.I))
             if await candidates.count()!=1:
@@ -382,7 +404,7 @@ class Bridge:
             await self.capture_jupyter(before)
         elif action=='launch':
             await self.set_state(AppState.JOB_QUEUED, 'ARC job submitted from the reviewed OOD form.', force=True)
-        return ('Job submitted. Wait for it to become ready in OOD, then choose Connect ready session.' if action=='launch'
+        return ('Job submitted. Wait for it to become ready in OOD; Student Mode can check Jupyter readiness automatically.' if action=='launch'
                 else 'Jupyter connection opened. Once its page loads, choose Attach to Jupyter.')
 
     def jupyter_tabs(self):

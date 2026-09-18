@@ -2,6 +2,10 @@
 
 One self-contained HTML interface plus a local Python browser/Jupyter helper. The helper opens a separate Chromium window for VT login/MFA; no VT passwords are entered into the chatbot. VPN must be enabled using your normal client.
 
+## Contributors
+
+ARC Chat was created by **William Taggart**. **Alejandro Grenier** is a major development contributor across the current architecture, reliability/security hardening, Windows and cross-platform packaging, Student Mode onboarding/UX, automated testing, and Advanced ARC workflows including Slurm and managed vLLM. See [`CONTRIBUTORS.md`](CONTRIBUTORS.md) and the Git history for attribution details.
+
 ## Downloads
 
 [Windows bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.4.0/ARC-Chat-Windows.zip) | [macOS bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.4.0/ARC-Chat-macOS.zip) | [Linux bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.4.0/ARC-Chat-Linux.zip) | [Source archive](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.4.0/ARC-Chat-source.zip) | [Release notes](https://github.com/FL2744/arc-chat/blob/v0.4.0/docs/RELEASE_v0.4.0.md)
@@ -41,13 +45,13 @@ python -m venv .venv
 
 The helper opens the HTML interface at a local address with a random access token. Keep the terminal open. No web hosting, Node.js, API SDK, or ARC-side software installation is required. Do not expose port 8765 to the network.
 
-Student Mode uses the selected course profile and keeps infrastructure details out of the normal workflow. Set `ARC_COURSE_ALLOCATION` to the instructor-provided course allocation before using **Start course workspace**. If that variable is not present, switch to Advanced Mode and select an authorized allocation manually in OOD. The repository contains no personal or public default allocation.
+Student Mode uses the selected course profile and keeps infrastructure details out of the normal workflow. A course may preconfigure its allocation through `ARC_COURSE_ALLOCATION`; if it does not, ARC Chat opens the normal visible OOD Jupyter form and surfaces only the allocations already available to the signed-in ARC account. The user selects and reviews an authorized allocation before launch. The repository contains no personal or public default allocation.
 
 ## Connect and work
 
-1. Set `ARC_COURSE_ALLOCATION` when using Student Mode, enable VT VPN if needed, and click **Start course workspace**. Complete VT credentials and MFA in the visible Chromium window.
-2. Review resources and walltime in OOD, then click **Launch** there or **Launch reviewed job** in Advanced Mode. If site labels differ, fill in the form manually. Provisioning is deliberately user-submitted; the helper does not guess resource settings.
-3. Once the job is ready, click **Connect ready session** in the chat (or **Connect to Jupyter** in OOD), then **Attach to Jupyter** in the chat. The helper captures the opened tab and attaches automatically. For a manually opened tab, click Attach automatically; if several distinct servers are open, choose a session button. This creates a new persistent Python kernel and a uniquely named `ARC-chat-….ipynb` notebook in the Jupyter root. Choose an installed kernel name if `python3` is unavailable.
+1. Enable VT VPN if needed and click **Open ARC & sign in** in Student Mode. Complete VT credentials and MFA in the visible Chromium window.
+2. If the course profile does not preconfigure an allocation, choose one of the allocations already authorized for the signed-in ARC account. Review the visible OOD Jupyter form, including allocation, GPU, and walltime, before launching it. ARC Chat never silently chooses or launches an allocation.
+3. After submission, Student Mode checks Jupyter readiness for a bounded period without relaunching the job. **Check now** and **Open ARC** remain available. When Jupyter is ready, attach the workspace; the helper captures the opened tab and attaches automatically. This creates a new persistent Python kernel and a uniquely named `ARC-chat-....ipynb` notebook in the Jupyter root. Choose an installed kernel name if `python3` is unavailable.
 4. Enter the model API key for the selected provider. Student Mode uses the Virginia Tech ARC shared endpoint and the course profile's model policy. Advanced Mode can also use a dedicated ARC Open OnDemand LLM session, a reviewed ARC vLLM job through a localhost SSH tunnel, OpenAI, or a custom OpenAI-compatible endpoint. Dedicated ARC endpoints are restricted to ARC HTTPS hosts; arbitrary custom endpoints must use public HTTPS and may not target local/private addresses. Managed-vLLM keys stay inside the helper.
 5. Send a request, review proposed Python, and click **Run Python**. Outputs appear as they arrive. Click **Continue with outputs** to let the model inspect the results and propose the next step. Each proposed execution requires a click; there is no unattended execution loop.
 6. Reply to Python `input()` and `getpass()` prompts in the input box. Input answers are omitted from chatbot history, but the Python program itself can print or save them. Never put API keys directly into chat or source cells; use `getpass.getpass()`.
@@ -71,11 +75,11 @@ These Advanced controls are implemented against the official ARC documentation a
 
 ARC Chat exposes a token-protected, loopback-only `/api/v1` contract for separate research applications:
 
-- `GET /api/v1/status` — non-secret application/workspace status and capability flags;
-- `GET /api/v1/jobs` — local non-secret Slurm/job provenance;
-- `GET /api/v1/artifacts` — artifact/provenance metadata;
-- `GET/POST /api/v1/proposals` — inspect or submit a handoff proposal for human review;
-- `DELETE /api/v1/proposals/{id}` — dismiss a proposal.
+- `GET /api/v1/status` - non-secret application/workspace status and capability flags;
+- `GET /api/v1/jobs` - local non-secret Slurm/job provenance;
+- `GET /api/v1/artifacts` - artifact/provenance metadata;
+- `GET/POST /api/v1/proposals` - inspect or submit a handoff proposal for human review;
+- `DELETE /api/v1/proposals/{id}` - dismiss a proposal.
 
 There are deliberately **no** external HTTP routes for Python execution, file mutation, Slurm submit/cancel, or model-service start/stop. External tools request reviewed handoffs; ARC Chat remains the human-approval boundary. See `examples/integration_client.py` for a standard-library example.
 
@@ -141,7 +145,7 @@ Automatic attachment tracks the tab opened by Connect ready session (including p
 
 The helper continuously reads kernel WebSocket messages between code runs to maintain ping/pong. If the connection closes while idle, new execution reconnects to the same existing kernel without clearing variables or history. Busy kernels are preserved and require waiting or interruption; code is never automatically replayed after a mid-execution disconnect.
 
-Recovery from an OOD 502/503/504: check My Interactive Sessions for a reachable running Jupyter job. Connect ready session can switch from a stale server to the newly opened server without deleting the old kernel or files. Disconnect old session clears only local connection references when needed. Switching to a different server creates a fresh Python workspace; saved files remain on their original filesystem, but in-memory variables are not transferred. A helper restart can reattach a still-running previously recorded session when it is safely discoverable, without executing notebook cells. Updating the files does not hot-reload a running helper: quit the helper and reopen the app to use build 2026.09.17.11.
+Recovery from an OOD 502/503/504: check My Interactive Sessions for a reachable running Jupyter job. Connect ready session can switch from a stale server to the newly opened server without deleting the old kernel or files. Disconnect old session clears only local connection references when needed. Switching to a different server creates a fresh Python workspace; saved files remain on their original filesystem, but in-memory variables are not transferred. A helper restart can reattach a still-running previously recorded session when it is safely discoverable, without executing notebook cells. Updating the files does not hot-reload a running helper: quit the helper and reopen the app to use build 2026.09.18.1.
 
 ## Certificate verification on macOS
 

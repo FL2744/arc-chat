@@ -12,7 +12,7 @@ ARC Chat is currently maintained as a small project rather than a Virginia Tech 
 
 ## Institutional boundary
 
-The repository does not claim to represent an officially supported Virginia Tech product. Institutional deployment decisions—managed distribution, signing/notarization credentials, formal support ownership, data classification approval, and copyright/licensing ownership—require the appropriate Virginia Tech/project stakeholders.
+The repository does not claim to represent an officially supported Virginia Tech product. Institutional deployment decisions - managed distribution, signing/notarization credentials, formal support ownership, data classification approval, and copyright/licensing ownership - require the appropriate Virginia Tech/project stakeholders.
 
 ## Release authority
 

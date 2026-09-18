@@ -78,10 +78,68 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
             b=Bridge(); b.capture_jupyter=AsyncMock(); page=Page(labels); b.context=SimpleNamespace(pages=[page])
             await b.browser_click('connect')
             self.assertEqual([i['label'] for i in page.items if i['clicked']],[expected])
-        for labels in [[notebook,lab,notebook,lab],[]]:
+        for labels in [[notebook,lab,notebook,lab]]:
             b=Bridge(); b.capture_jupyter=AsyncMock(); page=Page(labels); b.context=SimpleNamespace(pages=[page])
             with self.assertRaises(ValueError): await b.browser_click('connect')
             self.assertFalse(any(i['clicked'] for i in page.items))
+
+        b=Bridge(); b.capture_jupyter=AsyncMock(); page=Page([]); b.context=SimpleNamespace(pages=[page]); b.emit=AsyncMock()
+        result=await b.browser_click('connect')
+        self.assertIn('still starting',result)
+        self.assertFalse(any(i['clicked'] for i in page.items))
+        self.assertEqual(b.emit.call_args.kwargs['stage'],'waiting')
+
+    async def test_student_workspace_without_preconfigured_allocation_uses_visible_form(self):
+        b=Bridge()
+        b.profile=SimpleNamespace(resolved_allocation=lambda: '')
+        b.context=SimpleNamespace(pages=[SimpleNamespace(url='https://ood.arc.vt.edu/pun/sys/dashboard')])
+        b.ood=SimpleNamespace(
+            open=AsyncMock(return_value='opened'),
+            prepare=AsyncMock(return_value='choose an allocation in the visible form'),
+        )
+        result=await b.start_workspace()
+        self.assertIn('visible form',result)
+        b.ood.prepare.assert_awaited_once_with('')
+        b.ood.open.assert_not_awaited()
+
+    async def test_prepare_surfaces_authorized_allocations_without_auto_selecting_one(self):
+        class Options:
+            def __init__(self, items): self.items=items
+            async def evaluate_all(self, _script): return self.items
+        class Field:
+            def __init__(self, items): self.items=items; self.selected=[]
+            async def count(self): return 1
+            def locator(self, selector):
+                self.assert_option_selector(selector)
+                return Options(self.items)
+            def assert_option_selector(self, selector):
+                if selector!='option': raise AssertionError(selector)
+            async def select_option(self, *, value): self.selected.append(value)
+        class Link:
+            async def count(self): return 1
+            async def click(self): pass
+        cluster=Field([{'label':'Select','value':''},{'label':'Falcon','value':'falcon'}])
+        account=Field([
+            {'label':'Select an account','value':''},
+            {'label':'course-alpha','value':'course-alpha'},
+            {'label':'research-lab','value':'research-lab'},
+        ])
+        class Page:
+            url='https://ood.arc.vt.edu/pun/sys/dashboard'
+            def get_by_role(self, role, name): return Link()
+            def get_by_label(self, name):
+                return cluster if name.search('Cluster') else account
+            async def wait_for_load_state(self, _state): pass
+            async def bring_to_front(self): pass
+        b=Bridge(); b.context=SimpleNamespace(pages=[Page()]); b.emit=AsyncMock()
+        result=await b.prepare('')
+        self.assertIn('Choose an allocation',result)
+        self.assertEqual(cluster.selected,['falcon'])
+        self.assertEqual(account.selected,[])
+        event=b.emit.call_args_list[-1]
+        self.assertEqual(event.args[0],'workspace_setup')
+        self.assertEqual(event.kwargs['stage'],'allocation')
+        self.assertEqual(event.kwargs['allocation_options'],['course-alpha','research-lab'])
 
     async def test_automatic_tab_discovery(self):
         a=SimpleNamespace(url='https://ood.arc.vt.edu/node/a/123/tree', title=AsyncMock(return_value='A'))

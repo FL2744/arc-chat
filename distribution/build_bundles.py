@@ -19,7 +19,7 @@ COMMON = (
     "model_providers.py", "diagnostics.py", "ood.py", "workspace.py",
     "protocol.py", "security.py", "context_window.py", "artifacts.py",
     "jobs.py", "services.py", "integration.py", "errors.py", "version.py",
-    "profiles.example.json", "README.md", "SUPPORT.md", "SECURITY.md",
+    "profiles.example.json", "README.md", "CONTRIBUTORS.md", "SUPPORT.md", "SECURITY.md",
 )
 
 

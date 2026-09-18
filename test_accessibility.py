@@ -1,3 +1,4 @@
+import re
 import unittest
 from html.parser import HTMLParser
 from pathlib import Path
@@ -81,6 +82,12 @@ class AccessibilitySmokeTests(unittest.TestCase):
         controls = {ord(ch) for ch in self.source if ord(ch) < 32 and ch not in "\n\r\t"}
         self.assertEqual(controls, set())
         self.assertNotIn(" ? ", self.source)
+        # Common UTF-8-as-Windows-1252 mojibake signatures.
+        for marker in ("\u00e2\u20ac", "\u00c2", "\u00c3"):
+            self.assertNotIn(marker, self.source)
+        # CSS pseudo-element content must remain ASCII-safe.
+        for match in re.finditer(r"content\s*:\s*([\"\'])(.*?)\1", self.source):
+            self.assertTrue(match.group(2).isascii(), f"non-ASCII CSS content glyph: {match.group(2)!r}")
 
 
 if __name__ == "__main__":

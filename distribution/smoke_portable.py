@@ -76,7 +76,7 @@ def smoke(package: Path) -> None:
                     time.sleep(0.2)
             else:
                 raise RuntimeError("Packaged ARC Chat did not become ready within 30 seconds")
-            if b"ARC Chat" not in body:
+            if b'id="main-content"' not in body or b'id="status"' not in body:
                 raise RuntimeError("Packaged ARC Chat served unexpected UI content")
             if not state.exists():
                 raise RuntimeError("Packaged ARC Chat did not persist its non-secret launch state")
