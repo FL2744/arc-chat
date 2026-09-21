@@ -1,3 +1,5 @@
+![arc-chat logo](arc-chat-logo.png)
+
 # ARC Research Chat
 
 One self-contained HTML interface plus a local Python browser/Jupyter helper. The helper opens a separate Chromium window for VT login/MFA; no VT passwords are entered into the chatbot. VPN must be enabled using your normal client.
