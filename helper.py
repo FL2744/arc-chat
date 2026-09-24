@@ -24,6 +24,7 @@ from services import EndpointRegistry, SshTunnel, VllmServiceManager, VllmServic
 from state import AppState, AppStateMachine, InvalidTransition
 from version import BUILD, VERSION
 from workspace import JupyterWorkspace
+from workspaces import WorkspaceRegistry
 
 ROOT = Path(__file__).parent
 TOKEN = secrets.token_urlsafe(32)
@@ -149,6 +150,7 @@ class Bridge:
         self.ood = OODBrowserAdapter(self)
         self.workspace = JupyterWorkspace(self)
         self.project_registry = ProjectRegistry()
+        self.workspace_registry = WorkspaceRegistry()
         self.recovery_path = self._recovery_path() if enable_recovery else None
         self.recovery_metadata = self._load_recovery_state() if enable_recovery else {}
         if self.recovery_metadata:
@@ -159,10 +161,19 @@ class Bridge:
                 self.recovery_metadata.get('projects'),
                 current_project_id=str(self.recovery_metadata.get('current_project_id') or ''),
             )
-        self.control_plane = ControlPlane.for_profile(self.profile, projects=self.project_registry)
+            self.workspace_registry = WorkspaceRegistry.from_records(
+                self.recovery_metadata.get('workspaces'),
+                current_workspace_id=str(self.recovery_metadata.get('current_workspace_id') or ''),
+            )
+        self.control_plane = ControlPlane.for_profile(
+            self.profile,
+            projects=self.project_registry,
+            workspaces=self.workspace_registry,
+        )
         # Compatibility aliases keep the existing helper/UI seams stable while
         # the provider-neutral control plane becomes reusable by a hosted gateway.
         self.project_registry = self.control_plane.projects
+        self.workspace_registry = self.control_plane.workspaces
         self.provider_registry = self.control_plane.providers
         self.placement_engine = self.control_plane.placement
         self.resource_resolver = self.control_plane.resolver
@@ -195,11 +206,12 @@ class Bridge:
             return {}
         try:
             value = json.loads(self.recovery_path.read_text(encoding='utf-8'))
-            if not isinstance(value, dict) or value.get('version') not in {1, 2, 3}:
+            if not isinstance(value, dict) or value.get('version') not in {1, 2, 3, 4}:
                 return {}
             return {k:value.get(k) for k in (
                 'version','build','app_version','profile','workspace_base','notebook_path','session_id',
-                'job_id','jobs','artifacts','projects','current_project_id','saved_at'
+                'job_id','jobs','artifacts','projects','current_project_id',
+                'workspaces','current_workspace_id','saved_at'
             )}
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return {}
@@ -213,7 +225,7 @@ class Bridge:
         if project and self.last_job_id:
             project.link('job', self.last_job_id, active=True)
         payload = {
-            'version': 3,
+            'version': 4,
             'build': self.build,
             'app_version': self.version,
             'profile': self.profile.id,
@@ -225,6 +237,8 @@ class Bridge:
             'artifacts': self.artifacts.export_records(),
             'projects': self.project_registry.export_records(),
             'current_project_id': self.project_registry.current_project_id,
+            'workspaces': self.workspace_registry.export_records(),
+            'current_workspace_id': self.workspace_registry.current_workspace_id,
             'saved_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         self.recovery_path.parent.mkdir(parents=True, exist_ok=True)
@@ -237,6 +251,21 @@ class Bridge:
             self.recovery_metadata = payload
         finally:
             if temporary.exists(): temporary.unlink()
+
+    def remember_workspace(self, provider_id, source, *, kind='interactive', state='ready', display_name=''):
+        source = str(source or '').strip()
+        if not source:
+            raise ValueError('Workspace source cannot be empty.')
+        workspace_id = stable_resource_id('workspace', source)
+        record = self.control_plane.ensure_workspace(
+            workspace_id=workspace_id,
+            provider_id=provider_id,
+            kind=kind,
+            state=state,
+            display_name=display_name,
+            make_current=True,
+        )
+        return record
 
     def remember_secret(self, value):
         if isinstance(value, str) and len(value) >= 4:
@@ -607,6 +636,10 @@ class Bridge:
                     self.session, self.kernel = prior['id'], prior['kernel']['id']
                     await self.open_channel()
                     self.history=[]; self.pending=None
+                    self.remember_workspace(
+                        'arc', self.base, kind='interactive', state='ready',
+                        display_name='ARC Jupyter workspace',
+                    )
                     await self.set_state(AppState.WORKSPACE_READY, 'Recovered the prior Jupyter kernel after helper restart.', force=True)
                     self.persist_state()
                     return 'Recovered the prior Jupyter kernel and notebook after reauthentication. No code was replayed.'
@@ -630,6 +663,10 @@ class Bridge:
             self.kernel=self.session=None
             raise
         self.history=[]; self.pending=None
+        self.remember_workspace(
+            'arc', self.base, kind='interactive', state='ready',
+            display_name='ARC Jupyter workspace',
+        )
         await self.set_state(AppState.WORKSPACE_READY, 'Jupyter workspace is ready.', force=True)
         self.persist_state()
         return 'Connected. Notebook: '+self.notebook_path
@@ -652,6 +689,9 @@ class Bridge:
         if self.session: await self.api('DELETE','api/sessions/'+self.session)
         if self.channel: await self.channel.close()
         self.kernel=self.session=None; self.pending=None
+        current_workspace = self.workspace_registry.current()
+        if current_workspace and current_workspace.provider_id == 'arc':
+            current_workspace.transition('stopped')
         await self.set_state(AppState.READY_LOCAL, 'Chat kernel stopped; the OOD allocation remains user-managed.', force=True)
         self.persist_state()
         return 'Kernel stopped. End the OOD job in My Interactive Sessions to release the allocation.'
@@ -896,6 +936,11 @@ class Bridge:
             if not url:
                 raise ValueError('This course profile does not configure a browser notebook.')
             webbrowser.open(url)
+            workspace = self.remember_workspace(
+                'browser', url, kind='browser', state='ready',
+                display_name='Browser / JupyterLite',
+            )
+            self.persist_recovery_state()
             current_project = self.project_registry.current()
             await self.emit('placement', item={
                 'provider_id':'browser',
@@ -905,6 +950,7 @@ class Bridge:
                 'requires_review':False,
                 'launch_url':url,
                 'project_id':current_project.manifest.id if current_project else '',
+                'workspace_id':workspace.id,
             })
             return 'Browser notebook opened. No ARC job or local Python installation is required.'
         if action=='placement_preview':
