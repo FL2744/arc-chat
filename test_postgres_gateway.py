@@ -69,7 +69,7 @@ class PostgresGatewayAcceptanceTests(unittest.IsolatedAsyncioTestCase):
         if with_application:
             applications.append({
                 "key": "browser-notebook", "name": "Browser notebook",
-                "application_type": "jupyterlite", "provider": "browser", "audience": "course",
+                "application_type": "browser", "provider": "browser", "audience": "course",
             })
         spec = validate_project_spec({
             "slug": slug,
