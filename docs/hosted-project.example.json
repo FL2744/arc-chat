@@ -1,0 +1,37 @@
+{
+  "slug": "fl2744",
+  "name": "FL 2744",
+  "kind": "course",
+  "audience": "course",
+  "default_provider": "browser",
+  "allowed_providers": [
+    "browser",
+    "arc"
+  ],
+  "data_classification": "low",
+  "metadata": {
+    "course_code": "FL 2744"
+  },
+  "course_groups": [],
+  "applications": [
+    {
+      "key": "jupyterlite",
+      "name": "Browser notebook",
+      "application_type": "browser",
+      "runtime": "python",
+      "provider": "browser",
+      "audience": "course",
+      "metadata": {
+        "deployment": "static-jupyterlite"
+      }
+    },
+    {
+      "key": "arc-interactive",
+      "name": "ARC interactive workspace",
+      "application_type": "interactive",
+      "runtime": "python",
+      "provider": "arc",
+      "audience": "course"
+    }
+  ]
+}

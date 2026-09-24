@@ -6,13 +6,15 @@ import datetime as dt
 import json
 import mimetypes
 import re
-import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import PurePosixPath
 from typing import Any, Iterable
 
+from identifiers import new_id
+from security import validate_public_metadata
 
-ARTIFACT_ID_RE = re.compile(r"^artifact-[0-9a-f]{16,32}$")
+
+ARTIFACT_ID_RE = re.compile(r"^(?:art_[0-9a-f]{32}|artifact-[0-9a-f]{16,32})$")
 MEDIA_OVERRIDES = {
     ".csv": "text/csv",
     ".json": "application/json",
@@ -43,6 +45,14 @@ class ArtifactRecord:
     media_type: str
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if not ARTIFACT_ID_RE.fullmatch(self.id):
+            raise ValueError("Invalid artifact id.")
+        safe_workspace_path(self.path)
+        if not self.workspace or len(self.workspace) > 128:
+            raise ValueError("Invalid artifact workspace id.")
+        validate_public_metadata(self.metadata, label="Artifact metadata")
+
     @classmethod
     def create(
         cls,
@@ -56,14 +66,14 @@ class ArtifactRecord:
     ) -> "ArtifactRecord":
         safe = safe_workspace_path(path)
         return cls(
-            id="artifact-" + uuid.uuid4().hex[:24],
+            id=new_id("artifact"),
             type=type,
             path=safe,
             workspace=workspace or "workspace-unknown",
             created_by=created_by or "unknown",
             created_at=dt.datetime.now(dt.timezone.utc).isoformat(),
             media_type=media_type or MEDIA_OVERRIDES.get(PurePosixPath(safe).suffix.lower()) or mimetypes.guess_type(safe)[0] or "application/octet-stream",
-            metadata=dict(metadata or {}),
+            metadata=validate_public_metadata(metadata or {}, label="Artifact metadata"),
         )
 
 
@@ -113,6 +123,7 @@ class ArtifactStore:
                 safe_workspace_path(record.path)
                 if not isinstance(record.metadata, dict):
                     continue
+                validate_public_metadata(record.metadata, label="Artifact metadata")
                 store.add(record)
             except (TypeError, ValueError):
                 continue

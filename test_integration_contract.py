@@ -6,6 +6,7 @@ from aiohttp.test_utils import TestServer
 
 import helper
 from helper import Bridge, TOKEN, create_app
+from apps import ApplicationManifest
 from integration import IntegrationProposal, ProposalStore
 
 
@@ -59,6 +60,70 @@ class LoopbackIntegrationApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("do-not-expose-this-secret", rendered)
         self.assertFalse(payload["capabilities"]["execute_resource_mutation"])
         self.assertTrue(payload["capabilities"]["submit_review_proposal"])
+        self.assertEqual(payload["project"]["manifest"]["id"], "fl2744")
+        self.assertTrue(any(item["id"] == "browser" for item in payload["providers"]))
+
+
+    async def test_projects_and_providers_are_read_only(self):
+        projects = await self.client.get(self.url("/api/v1/projects"))
+        self.assertEqual(projects.status, 200)
+        project_payload = await projects.json()
+        self.assertEqual(project_payload["current_project_id"], "fl2744")
+        self.assertEqual(project_payload["items"][0]["manifest"]["id"], "fl2744")
+
+        providers = await self.client.get(self.url("/api/v1/providers"))
+        self.assertEqual(providers.status, 200)
+        provider_ids = {item["id"] for item in (await providers.json())["items"]}
+        self.assertTrue({"browser", "arc"} <= provider_ids)
+
+        for path in ("/api/v1/projects", "/api/v1/workspaces", "/api/v1/providers", "/api/v1/applications"):
+            response = await self.client.post(self.url(path), json={})
+            self.assertEqual(response.status, 405)
+
+    async def test_workspaces_are_project_scoped_read_only_records(self):
+        record = self.bridge.remember_workspace(
+            "browser",
+            "https://fl2744.github.io/jupyterlite/lab/index.html",
+            kind="browser",
+            state="ready",
+            display_name="Browser / JupyterLite",
+        )
+        response = await self.client.get(self.url("/api/v1/workspaces"))
+        self.assertEqual(response.status, 200)
+        payload = await response.json()
+        self.assertEqual(payload["current_workspace_id"], record.id)
+        self.assertEqual(payload["items"][0]["provider_id"], "browser")
+        self.assertNotIn("fl2744.github.io", str(payload))
+        denied = await self.client.post(self.url("/api/v1/workspaces"), json={})
+        self.assertEqual(denied.status, 405)
+        self.bridge.dispatch.assert_not_awaited()
+
+    async def test_read_only_application_and_placement_planning(self):
+        self.bridge.control_plane.applications.register(ApplicationManifest(
+            id="browser-notebook", name="Browser Notebook", project_id="fl2744",
+            application_type="browser", provider="browser", audience="course",
+        ))
+
+        apps = await self.client.get(self.url("/api/v1/applications"))
+        self.assertEqual(apps.status, 200)
+        app_payload = await apps.json()
+        self.assertEqual(app_payload["items"][0]["id"], "browser-notebook")
+
+        placement = await self.client.post(
+            self.url("/api/v1/placement"),
+            json={"mode": "interactive", "estimated_input_mb": 2},
+        )
+        self.assertEqual(placement.status, 200)
+        placement_payload = await placement.json()
+        self.assertFalse(placement_payload["executed"])
+        self.assertEqual(placement_payload["placement"]["provider_id"], "browser")
+
+        plan = await self.client.post(self.url("/api/v1/applications/browser-notebook/plan"), json={})
+        self.assertEqual(plan.status, 200)
+        plan_payload = await plan.json()
+        self.assertFalse(plan_payload["executed"])
+        self.assertEqual(plan_payload["plan"]["provider_id"], "browser")
+        self.bridge.dispatch.assert_not_awaited()
 
     async def test_external_post_only_creates_review_proposal(self):
         response = await self.client.post(
@@ -89,7 +154,7 @@ class LoopbackIntegrationApiTests(unittest.IsolatedAsyncioTestCase):
             json={"kind": "run_python", "summary": "execute this"},
         )
         self.assertEqual(bad.status, 400)
-        for path in ("/api/v1/jobs", "/api/v1/artifacts", "/api/v1/status"):
+        for path in ("/api/v1/jobs", "/api/v1/artifacts", "/api/v1/status", "/api/v1/projects", "/api/v1/providers"):
             response = await self.client.post(self.url(path), json={})
             self.assertEqual(response.status, 405)
 

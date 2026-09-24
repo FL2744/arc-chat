@@ -96,8 +96,10 @@ jobs:
           git archive --format=zip --prefix=arc-chat-${GITHUB_REF_NAME}/ -o ARC-Chat-source.zip HEAD
           sha256sum ARC-Chat-source.zip > ARC-Chat-source.zip.sha256
           python distribution/build_bundles.py Windows Linux
+          python distribution/build_student_web.py
           cp dist/ARC-Chat-Windows.zip dist/ARC-Chat-Windows.zip.sha256 .
           cp dist/ARC-Chat-Linux.zip dist/ARC-Chat-Linux.zip.sha256 .
+          cp dist/ARC-Chat-Student-Web.zip dist/ARC-Chat-Student-Web.zip.sha256 .
       - name: Upload source artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -109,6 +111,8 @@ jobs:
             ARC-Chat-Windows.zip.sha256
             ARC-Chat-Linux.zip
             ARC-Chat-Linux.zip.sha256
+            ARC-Chat-Student-Web.zip
+            ARC-Chat-Student-Web.zip.sha256
 
   publish:
     name: Publish preview release
@@ -152,7 +156,9 @@ jobs:
             ARC-Chat-Windows.zip \
             ARC-Chat-Windows.zip.sha256 \
             ARC-Chat-Linux.zip \
-            ARC-Chat-Linux.zip.sha256; do
+            ARC-Chat-Linux.zip.sha256 \
+            ARC-Chat-Student-Web.zip \
+            ARC-Chat-Student-Web.zip.sha256; do
             test -s "release/$file"
           done
       - name: Publish API-free download branch
@@ -176,7 +182,9 @@ jobs:
             ARC-Chat-Windows.zip \
             ARC-Chat-Windows.zip.sha256 \
             ARC-Chat-Linux.zip \
-            ARC-Chat-Linux.zip.sha256; do
+            ARC-Chat-Linux.zip.sha256 \
+            ARC-Chat-Student-Web.zip \
+            ARC-Chat-Student-Web.zip.sha256; do
             cp "release/$file" "$stage/$file"
           done
 
@@ -190,6 +198,7 @@ jobs:
           - ARC-Chat-macOS.zip - macOS bootstrap app
           - ARC-Chat-Linux.zip - Linux bootstrap
           - ARC-Chat-source.zip - source archive
+          - ARC-Chat-Student-Web.zip - static browser-first student client for VT Domains-style hosting
 
           The bootstrap packages require internet access on first launch and install their runtime dependencies/Chromium locally.
           The much larger self-contained Windows/macOS bundles are retained as CI artifacts rather than normal Git objects.
@@ -218,7 +227,9 @@ jobs:
             ARC-Chat-Windows.zip \
             ARC-Chat-Windows.zip.sha256 \
             ARC-Chat-Linux.zip \
-            ARC-Chat-Linux.zip.sha256; do
+            ARC-Chat-Linux.zip.sha256 \
+            ARC-Chat-Student-Web.zip \
+            ARC-Chat-Student-Web.zip.sha256; do
             url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${ASSET_BRANCH}/${file}"
             echo "Verifying $url"
             curl --fail --silent --show-error --location --head \

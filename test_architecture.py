@@ -16,6 +16,9 @@ class ProfileTests(unittest.TestCase):
     def test_builtin_course_profile_has_no_personal_allocation(self):
         profile = get_profile("fl2744")
         self.assertEqual(profile.allocation, "${ARC_COURSE_ALLOCATION}")
+        self.assertEqual(profile.project_id, "fl2744")
+        self.assertEqual(profile.allowed_providers, ("browser", "arc"))
+        self.assertEqual(profile.jupyterlite_url, "https://fl2744.github.io/jupyterlite/lab/index.html")
         self.assertEqual(profile.resolved_allocation({}), "")
         self.assertEqual(profile.resolved_allocation({"ARC_COURSE_ALLOCATION": "course-project"}), "course-project")
         self.assertTrue(profile.allows_model("arc", "gpt-oss-120b", False))
@@ -121,18 +124,52 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
                 bridge.notebook_path = "ARC-chat-test.ipynb"
                 bridge.session = "session-123"
                 bridge.last_job_id = "4567"
+                bridge.remember_workspace(
+                    "arc", bridge.base, kind="interactive", state="ready",
+                    display_name="ARC Jupyter workspace",
+                )
                 bridge.persist_recovery_state()
                 rendered = path.read_text(encoding="utf-8")
                 self.assertNotIn("model-secret-key", rendered)
                 self.assertNotIn("another-secret-value", rendered)
                 saved = json.loads(rendered)
+                self.assertEqual(saved["version"], 4)
                 self.assertEqual(saved["job_id"], "4567")
                 self.assertEqual(saved["notebook_path"], "ARC-chat-test.ipynb")
+                self.assertEqual(saved["current_project_id"], "fl2744")
+                self.assertTrue(saved["projects"])
+                self.assertTrue(saved["workspaces"])
+                self.assertEqual(saved["current_workspace_id"], saved["workspaces"][0]["id"])
+                self.assertNotIn("example.org", json.dumps(saved["workspaces"]))
             finally:
                 if previous is None:
                     os.environ.pop("ARC_CHAT_RECOVERY_STATE", None)
                 else:
                     os.environ["ARC_CHAT_RECOVERY_STATE"] = previous
+
+
+    async def test_previous_workspace_probe_prefers_same_profile_without_mutation(self):
+        bridge = Bridge()
+        bridge.recovery_metadata = {
+            "profile": bridge.profile.id,
+            "workspace_base": "https://ood.arc.vt.edu/node/1234/",
+            "notebook_path": "ARC-chat-prior.ipynb",
+        }
+
+        class Response:
+            status = 200
+
+        class Request:
+            async def fetch(self, *args, **kwargs):
+                return Response()
+
+        class Context:
+            request = Request()
+
+        bridge.context = Context()
+        url = await bridge.recover_previous_workspace_url()
+        self.assertEqual(url, "https://ood.arc.vt.edu/node/1234/tree/ARC-chat-prior.ipynb")
+        self.assertIsNone(bridge.kernel)
 
     async def test_attach_can_resume_prior_kernel_without_replaying_code(self):
         with tempfile.TemporaryDirectory() as directory:

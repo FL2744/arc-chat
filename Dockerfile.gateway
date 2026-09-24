@@ -1,0 +1,25 @@
+# Multi-stage, non-root gateway image. The default base is pinned to the
+# reviewed multi-architecture Python 3.14 / Debian Trixie manifest digest.
+ARG PYTHON_BASE_IMAGE=python:3.14.7-slim-trixie@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc42430d531ea09f8a2
+
+FROM ${PYTHON_BASE_IMAGE} AS dependencies
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
+WORKDIR /build
+COPY requirements-gateway.txt ./requirements-gateway.txt
+RUN python -m pip wheel --wheel-dir=/wheels -r requirements-gateway.txt
+
+FROM ${PYTHON_BASE_IMAGE} AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app
+WORKDIR /app
+RUN groupadd --gid 10001 arcchat \
+    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin arcchat
+COPY --from=dependencies /wheels /wheels
+COPY requirements-gateway.txt ./requirements-gateway.txt
+RUN python -m pip install --no-index --find-links=/wheels -r requirements-gateway.txt \
+    && rm -rf /wheels requirements-gateway.txt
+COPY identifiers.py security.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py ./
+COPY hosted_gateway ./hosted_gateway
+USER 10001:10001
+EXPOSE 8080
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["python", "-m", "hosted_gateway.server"]

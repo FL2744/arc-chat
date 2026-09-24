@@ -49,6 +49,16 @@ The helper opens the HTML interface at a local address with a random access toke
 
 Student Mode uses the selected course profile and keeps infrastructure details out of the normal workflow. A course may preconfigure its allocation through `ARC_COURSE_ALLOCATION`; if it does not, ARC Chat opens the normal visible OOD Jupyter form and surfaces only the allocations already available to the signed-in ARC account. The user selects and reviews an authorized allocation before launch. The repository contains no personal or public default allocation.
 
+### Browser-first / CLAHS platform foundation
+
+The development branch now treats a **project** as the object above jobs and workspaces. Projects can retain non-secret links to ARC jobs, Jupyter workspaces, artifacts, endpoints, and future deployments. The resource resolver may automatically reuse an exact previously linked active resource, but it deliberately refuses to guess between unrelated or similarly matched jobs.
+
+Execution targets are modeled as providers rather than hard-coded UI paths. The currently enabled providers are **Browser / JupyterLite** for small zero-install work and **Virginia Tech ARC** for server-side packages, larger compute, and GPUs. VT IT Common Platform and general cloud hosting are represented only as planned provider contracts; no deployment automation or institutional-support claim is made for them yet.
+
+The static shell under [`web/student/`](web/student/) is designed for VT Domains-style hosting and contains no credentials or ARC session state. It now embeds the FL 2744 JupyterLite deployment as a live Notebook tab and is packaged as `ARC-Chat-Student-Web.zip` by CI/release builds. The built-in FL 2744 profile exposes that JupyterLite deployment as a public browser-compute launch target. See [`docs/CLAHS_PLATFORM_FOUNDATIONS.md`](docs/CLAHS_PLATFORM_FOUNDATIONS.md) and [`docs/HOSTED_GATEWAY.md`](docs/HOSTED_GATEWAY.md) for the control-plane and hosted-service boundaries.
+
+The optional hosted gateway now has an aiohttp API, PostgreSQL migrations, an OIDC-proxy boundary, course-group authorization, and a Kubernetes manifest renderer. It is not deployed to Virginia Tech infrastructure. The student client’s `gateway_url` remains blank in the checked-in public configuration, and hosted ARC mutations stay disabled pending an ARC-approved delegation API. See [`docs/HOSTED_GATEWAY.md`](docs/HOSTED_GATEWAY.md) for the deployment gates and current limitations.
+
 ## Connect and work
 
 1. Enable VT VPN if needed and click **Open ARC & sign in** in Student Mode. Complete VT credentials and MFA in the visible Chromium window.
@@ -79,6 +89,11 @@ ARC Chat exposes a token-protected, loopback-only `/api/v1` contract for separat
 
 - `GET /api/v1/status` - non-secret application/workspace status and capability flags;
 - `GET /api/v1/jobs` - local non-secret Slurm/job provenance;
+- `GET /api/v1/projects` - non-secret project/resource associations;
+- `GET /api/v1/providers` - execution-provider capabilities and availability state;
+- `GET /api/v1/applications` - project-scoped application manifests;
+- `POST /api/v1/placement` - compute a provider placement decision without provisioning anything;
+- `POST /api/v1/applications/{id}/plan` - produce a non-mutating deployment plan;
 - `GET /api/v1/artifacts` - artifact/provenance metadata;
 - `GET/POST /api/v1/proposals` - inspect or submit a handoff proposal for human review;
 - `DELETE /api/v1/proposals/{id}` - dismiss a proposal.
@@ -130,6 +145,8 @@ Optional integration test (local only): install `jupyter-server ipykernel nbform
 ### Course profiles and diagnostics
 
 The built-in `fl2744` profile reads its allocation from `ARC_COURSE_ALLOCATION`. For another course or managed deployment, point `ARC_CHAT_PROFILE_FILE` at a JSON file containing `"version": 1` and a `profiles` list; unsupported future schema versions fail closed. Profiles may define `id`, `name`, `workspace_backend`, `cluster`, `allocation`, `resource_profile`, `model_provider`, `model_policy`, `allowed_models`, and `advanced_mode`. Allocation values may reference an environment variable such as `${ARC_COURSE_ALLOCATION}`. Do not put API keys, passwords, browser cookies, or notebook content in profile files. See `profiles.example.json`.
+
+Optional application manifests use a separate versioned JSON file. Point `ARC_CHAT_APP_FILE` at a file containing `"version": 1` and an `applications` list; see `applications.example.json`. Application manifests describe project ownership, runtime class, audience, resource needs, and preferred provider. Planning is non-mutating: a planned Common Platform/cloud target can be identified without enabling deployment authority or claiming that integration exists.
 
 Use **Run diagnostics** to generate an in-app health report. It contains runtime, browser, workspace, and model-configuration status but excludes credentials, cookies, chat content, and notebook contents. Advanced Mode also provides **Run full workspace checks**, which explicitly tests OOD visibility, model reachability, Jupyter reachability, a temporary remote write/delete, and a visible kernel smoke-test cell.
 

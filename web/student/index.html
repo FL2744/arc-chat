@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self' __GATEWAY_ORIGIN__; frame-src https:; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>CLAHS Compute</title>
+  <style>
+    :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: Canvas; color: CanvasText; }
+    button, a { font: inherit; }
+    header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 20px; border-bottom: 1px solid color-mix(in srgb, CanvasText 14%, transparent); background: color-mix(in srgb, Canvas 94%, transparent); backdrop-filter: blur(16px); }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 760; }
+    .brand-mark { width: 12px; height: 12px; border: 3px solid currentColor; border-radius: 50%; }
+    nav { display: flex; gap: 6px; }
+    nav button { border: 0; border-radius: 9px; padding: 8px 11px; background: transparent; color: inherit; cursor: pointer; }
+    nav button[aria-selected="true"] { background: color-mix(in srgb, CanvasText 10%, transparent); font-weight: 680; }
+    main { min-height: calc(100vh - 58px); }
+    .view { display: none; }
+    .view.active { display: block; }
+    #home { max-width: 820px; margin: 0 auto; padding: 64px 22px 88px; }
+    h1 { margin: 0 0 10px; font-size: clamp(2.2rem, 6vw, 4rem); letter-spacing: -.045em; line-height: 1.02; }
+    .lede { margin: 0 0 36px; max-width: 700px; opacity: .72; font-size: 1.08rem; line-height: 1.6; }
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .card { display: flex; min-height: 215px; flex-direction: column; border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); border-radius: 18px; padding: 22px; background: color-mix(in srgb, CanvasText 2.5%, transparent); }
+    .card-head { display: flex; justify-content: space-between; gap: 14px; align-items: start; }
+    .card h2 { margin: 0 0 7px; font-size: 1.25rem; }
+    .card p { margin: 0; opacity: .72; line-height: 1.5; }
+    .status { flex: none; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); border-radius: 999px; padding: 4px 8px; font-size: .76rem; opacity: .72; }
+    .action { align-self: flex-start; margin-top: auto; border: 0; border-radius: 10px; padding: 10px 14px; text-decoration: none; background: CanvasText; color: Canvas; cursor: pointer; font-weight: 680; }
+    .note { margin-top: 28px; padding-top: 20px; border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); opacity: .68; line-height: 1.5; font-size: .92rem; }
+    #notebook { height: calc(100vh - 58px); }
+    .notebook-shell { height: 100%; display: grid; grid-template-rows: auto 1fr; }
+    .notebook-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 14px; border-bottom: 1px solid color-mix(in srgb, CanvasText 13%, transparent); }
+    .notebook-copy strong { display: block; font-size: .92rem; }
+    .notebook-copy span { display: block; margin-top: 2px; opacity: .62; font-size: .78rem; }
+    .notebook-actions { display: flex; gap: 8px; align-items: center; }
+    .notebook-actions a, .notebook-actions button { border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 8px; padding: 7px 10px; background: transparent; color: inherit; text-decoration: none; cursor: pointer; }
+    iframe { width: 100%; height: 100%; border: 0; background: white; }
+    .error { padding: 14px; border: 1px solid currentColor; border-radius: 10px; }
+    #workspace { max-width: 900px; margin: 0 auto; padding: 44px 22px 88px; }
+    .panel { margin: 22px 0; border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); border-radius: 16px; padding: 20px; background: color-mix(in srgb, CanvasText 2.5%, transparent); }
+    .panel h2 { margin: 0 0 8px; }
+    .panel p { line-height: 1.55; opacity: .76; }
+    .toolbar, .workspace-row, .project-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+    .toolbar button, .toolbar a, .workspace-row button, .workspace-row a { border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); border-radius: 9px; padding: 9px 12px; background: transparent; color: inherit; text-decoration: none; cursor: pointer; }
+    .toolbar .primary { background: CanvasText; color: Canvas; font-weight: 680; }
+    .toolbar button:disabled { opacity: .48; cursor: not-allowed; }
+    .project-row { justify-content: flex-start; margin: 18px 0; }
+    select { max-width: 100%; border: 1px solid color-mix(in srgb, CanvasText 20%, transparent); border-radius: 8px; padding: 9px; background: Canvas; color: CanvasText; }
+    #workspace-list { display: grid; gap: 10px; margin-top: 16px; }
+    .workspace-row { border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); padding-top: 12px; }
+    .workspace-row strong, .workspace-row span { display: block; }
+    .workspace-row span { margin-top: 4px; opacity: .7; font-size: .9rem; }
+    #platform-status { min-height: 1.5em; }
+    .muted { opacity: .68; }
+    @media (max-width: 620px) {
+      header { align-items: flex-start; flex-direction: column; }
+      #notebook { height: calc(100vh - 104px); }
+      .notebook-copy span { display: none; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span id="brand-title">CLAHS Compute</span></div>
+  <nav role="tablist" aria-label="Compute views">
+    <button type="button" role="tab" aria-selected="true" data-view="home">Start</button>
+    <button type="button" role="tab" aria-selected="false" data-view="notebook">Notebook</button>
+    <button type="button" role="tab" aria-selected="false" data-view="workspace">Projects</button>
+  </nav>
+</header>
+<main>
+  <section id="home" class="view active" role="tabpanel">
+    <h1 id="title">CLAHS Compute</h1>
+    <p id="subtitle" class="lede">Choose the simplest workspace that fits the task.</p>
+    <div id="apps" class="grid" aria-live="polite"></div>
+    <p class="note">Browser notebooks are best for quick Python and course work. ARC is the path for research workloads that need server-side packages, GPUs, larger data, or longer-running compute.</p>
+  </section>
+  <section id="notebook" class="view" role="tabpanel" aria-label="Browser notebook">
+    <div class="notebook-shell">
+      <div class="notebook-bar">
+        <div class="notebook-copy"><strong>Browser notebook</strong><span>Runs in this tab with JupyterLite; no ARC allocation is started.</span></div>
+        <div class="notebook-actions">
+          <a id="notebook-fullscreen" href="#" target="_blank" rel="noopener">Open full page</a>
+          <button id="notebook-home" type="button">Back</button>
+        </div>
+      </div>
+      <iframe id="notebook-frame" title="JupyterLite browser notebook" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads" allow="clipboard-read; clipboard-write"></iframe>
+    </div>
+  </section>
+  <section id="workspace" class="view" role="tabpanel" aria-label="Projects and workspaces">
+    <h1>Projects and workspaces</h1>
+    <p class="lede">Review the projects available to your account and manage workspace records.</p>
+    <div id="platform-panel" class="panel" hidden>
+      <div class="toolbar">
+        <div><strong id="identity-label">Checking sign-in…</strong><div id="identity-detail" class="muted"></div></div>
+        <div>
+          <a id="sign-in" class="primary" href="#">Sign in with Virginia Tech</a>
+          <a id="sign-out" href="#" hidden>Sign out</a>
+        </div>
+      </div>
+      <p id="platform-status" role="status" aria-live="polite">Connecting to the hosted workspace service…</p>
+      <div class="project-row">
+        <label for="project-select">Project</label>
+        <select id="project-select" aria-label="Select a project"><option value="">Sign in to load projects</option></select>
+        <button id="refresh-workspaces" type="button">Refresh</button>
+      </div>
+      <div class="toolbar">
+        <button id="start-browser" type="button" class="primary" disabled>Open browser workspace</button>
+        <button id="plan-arc" type="button" disabled>Check ARC fit</button>
+      </div>
+      <p class="muted">Browser workspaces use the configured JupyterLite site and this browser’s storage. Closing a workspace record does not stop an open notebook kernel. ARC and hosted application actions stay unavailable until an approved institutional adapter is configured.</p>
+      <div id="workspace-list" aria-live="polite"></div>
+    </div>
+    <p id="static-workspace-note" class="note">Hosted project controls are not configured for this static site. Browser notebooks remain available from the Start and Notebook views.</p>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const fallback = {
+  title: "CLAHS Compute",
+  subtitle: "Choose the simplest workspace that fits the task.",
+  notebook_url: "",
+  gateway_url: "",
+  applications: []
+};
+let config = fallback;
+let session = null;
+let csrfToken = "";
+
+function safeHttps(value) {
+  try {
+    const url = new URL(value, window.location.href);
+    return url.protocol === "https:" ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function safeOrigin(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) return "";
+    return url.origin;
+  } catch {
+    return "";
+  }
+}
+
+function authUrl(path) {
+  const origin = safeOrigin(config.gateway_url || "");
+  if (!origin) return "#";
+  const url = new URL(path, origin);
+  url.searchParams.set("rd", window.location.href);
+  return url.href;
+}
+
+function newIdempotencyKey() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+}
+
+async function api(path, options = {}) {
+  const origin = safeOrigin(config.gateway_url || "");
+  if (!origin) throw new Error("Hosted project controls are not configured.");
+  const headers = new Headers(options.headers || {});
+  headers.set("Accept", "application/json");
+  if (options.body) headers.set("Content-Type", "application/json");
+  if (options.method && options.method !== "GET") {
+    if (!csrfToken) throw new Error("Refresh the sign-in session before changing a workspace.");
+    headers.set("X-CSRF-Token", csrfToken);
+    headers.set("Idempotency-Key", newIdempotencyKey());
+  }
+  const response = await fetch(new URL(path, origin), { ...options, headers, credentials: "include", cache: "no-store" });
+  const contentType = response.headers.get("Content-Type") || "";
+  const payload = contentType.includes("application/json") ? await response.json() : {};
+  if (!response.ok) throw new Error(payload.message || `Request failed (${response.status}).`);
+  return payload;
+}
+
+function showView(name) {
+  const target = ["notebook", "workspace"].includes(name) ? name : "home";
+  document.querySelectorAll(".view").forEach(view => view.classList.toggle("active", view.id === target));
+  document.querySelectorAll("[data-view]").forEach(button => button.setAttribute("aria-selected", String(button.dataset.view === target)));
+  if (target === "notebook") loadNotebook();
+  if (target === "workspace" && safeOrigin(config.gateway_url || "") && !session) loadSession();
+}
+
+function loadNotebook() {
+  const url = safeHttps(config.notebook_url || "");
+  if (!url) {
+    showView("home");
+    return;
+  }
+  const frame = $("notebook-frame");
+  if (!frame.src) frame.src = url;
+  $("notebook-fullscreen").href = url;
+}
+
+function render(next) {
+  config = next && typeof next === "object" ? next : fallback;
+  $("title").textContent = config.title || fallback.title;
+  $("brand-title").textContent = config.title || fallback.title;
+  $("subtitle").textContent = config.subtitle || fallback.subtitle;
+
+  const root = $("apps");
+  root.replaceChildren();
+  for (const app of config.applications || []) {
+    if (app.enabled === false) continue;
+    const card = document.createElement("article");
+    card.className = "card";
+
+    const head = document.createElement("div");
+    head.className = "card-head";
+    const copy = document.createElement("div");
+    const name = document.createElement("h2");
+    name.textContent = app.name || "Application";
+    const description = document.createElement("p");
+    description.textContent = app.description || "";
+    copy.append(name, description);
+
+    const status = document.createElement("span");
+    status.className = "status";
+    status.textContent = app.status || "";
+    head.append(copy, status);
+    card.append(head);
+
+    if (app.view === "notebook") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "action";
+      button.textContent = app.action || "Open";
+      button.onclick = () => showView("notebook");
+      card.append(button);
+    } else {
+      const url = safeHttps(app.url || "");
+      if (url) {
+        const link = document.createElement("a");
+        link.className = "action";
+        link.href = url;
+        link.rel = "noopener";
+        link.textContent = app.action || "Open";
+        card.append(link);
+      }
+    }
+    root.append(card);
+  }
+
+  if (!root.childElementCount) {
+    const empty = document.createElement("p");
+    empty.className = "error";
+    empty.textContent = "No applications are configured yet.";
+    root.append(empty);
+  }
+
+  const gatewayEnabled = Boolean(safeOrigin(config.gateway_url || ""));
+  $("platform-panel").hidden = !gatewayEnabled;
+  $("static-workspace-note").hidden = gatewayEnabled;
+  if (gatewayEnabled) {
+    $("sign-in").href = authUrl("/oauth2/start");
+    $("sign-out").href = authUrl("/oauth2/sign_out");
+    loadSession();
+  }
+}
+
+function setPlatformStatus(message, isError = false) {
+  const status = $("platform-status");
+  status.textContent = message;
+  status.classList.toggle("error", isError);
+}
+
+async function loadSession() {
+  if (!safeOrigin(config.gateway_url || "")) return;
+  setPlatformStatus("Checking your sign-in and project access…");
+  try {
+    session = await api("/api/v1/session");
+    csrfToken = session.csrf_token || "";
+    $("identity-label").textContent = "Signed in";
+    $("identity-detail").textContent = session.user?.display_name || "Virginia Tech account";
+    $("sign-in").hidden = true;
+    $("sign-out").hidden = false;
+    const projects = await api("/api/v1/projects");
+    const selector = $("project-select");
+    selector.replaceChildren();
+    for (const project of projects.items || []) {
+      const option = document.createElement("option");
+      option.value = project.id;
+      option.textContent = `${project.name} (${project.role})`;
+      selector.append(option);
+    }
+    const remembered = sessionStorage.getItem("arc-chat-project") || "";
+    if (remembered && Array.from(selector.options).some(option => option.value === remembered)) selector.value = remembered;
+    selector.disabled = selector.options.length === 0;
+    $("start-browser").disabled = selector.options.length === 0;
+    $("plan-arc").disabled = selector.options.length === 0;
+    setPlatformStatus(selector.options.length ? "Project access is ready." : "You are signed in, but no course or research projects are assigned to this account.", !selector.options.length);
+    await loadWorkspaces();
+  } catch (error) {
+    session = null;
+    csrfToken = "";
+    $("identity-label").textContent = "Sign-in required";
+    $("identity-detail").textContent = "Sign in with your Virginia Tech account to see assigned projects.";
+    $("sign-in").hidden = false;
+    $("sign-out").hidden = true;
+    $("project-select").replaceChildren(new Option("Sign in to load projects", ""));
+    $("project-select").disabled = true;
+    $("start-browser").disabled = true;
+    $("plan-arc").disabled = true;
+    setPlatformStatus(error.message || "The workspace service could not be reached.", true);
+  }
+}
+
+async function loadWorkspaces() {
+  const projectId = $("project-select").value;
+  const root = $("workspace-list");
+  root.replaceChildren();
+  if (!projectId || !session) return;
+  try {
+    const result = await api(`/api/v1/workspaces?project_id=${encodeURIComponent(projectId)}`);
+    if (!(result.items || []).length) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = "No workspace records are attached to this project yet.";
+      root.append(empty);
+      return;
+    }
+    for (const workspace of result.items) {
+      const row = document.createElement("div");
+      row.className = "workspace-row";
+      const copy = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = workspace.display_name || `${workspace.provider_id} workspace`;
+      const state = document.createElement("span");
+      state.textContent = `${workspace.provider_id} · ${workspace.state}`;
+      copy.append(title, state);
+      row.append(copy);
+      if (workspace.provider_id === "browser" && workspace.state !== "stopped" && workspace.state !== "failed") {
+        const open = document.createElement("button");
+        open.type = "button";
+        open.textContent = "Open notebook";
+        open.onclick = () => showView("notebook");
+        const close = document.createElement("button");
+        close.type = "button";
+        close.textContent = "Close record";
+        close.onclick = () => closeWorkspace(workspace.id);
+        row.append(open, close);
+      }
+      root.append(row);
+    }
+  } catch (error) {
+    setPlatformStatus(error.message || "Workspace records could not be loaded.", true);
+  }
+}
+
+async function startBrowserWorkspace() {
+  const projectId = $("project-select").value;
+  if (!projectId) return;
+  $("start-browser").disabled = true;
+  try {
+    await api("/api/v1/workspaces", {
+      method: "POST",
+      body: JSON.stringify({ project_id: projectId, provider_id: "browser", display_name: "Browser notebook" }),
+    });
+    setPlatformStatus("Browser workspace is ready. Notebook data stays in this browser’s JupyterLite storage.");
+    await loadWorkspaces();
+    showView("notebook");
+  } catch (error) {
+    setPlatformStatus(error.message || "The browser workspace could not be created.", true);
+  } finally {
+    $("start-browser").disabled = !session || !$("project-select").value;
+  }
+}
+
+async function closeWorkspace(workspaceId) {
+  try {
+    await api(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/stop`, { method: "POST" });
+    setPlatformStatus("Workspace record closed. Close the notebook tab separately to stop its browser kernel.");
+    await loadWorkspaces();
+  } catch (error) {
+    setPlatformStatus(error.message || "The workspace record could not be closed.", true);
+  }
+}
+
+async function planArc() {
+  const projectId = $("project-select").value;
+  if (!projectId) return;
+  try {
+    const result = await api("/api/v1/placement", {
+      method: "POST",
+      body: JSON.stringify({ project_id: projectId, mode: "interactive", preferred_provider: "arc" }),
+    });
+    setPlatformStatus(result.reason || "ARC requires institutional provider review.", Boolean(result.requires_review));
+  } catch (error) {
+    setPlatformStatus(error.message || "ARC placement could not be checked.", true);
+  }
+}
+
+document.querySelectorAll("[data-view]").forEach(button => button.onclick = () => showView(button.dataset.view));
+$("notebook-home").onclick = () => showView("home");
+$("sign-in").onclick = event => { if ($( "sign-in").href.endsWith("#")) event.preventDefault(); };
+$("sign-out").onclick = event => { if ($( "sign-out").href.endsWith("#")) event.preventDefault(); };
+$("refresh-workspaces").onclick = () => loadSession();
+$("project-select").onchange = () => {
+  const projectId = $("project-select").value;
+  sessionStorage.setItem("arc-chat-project", projectId);
+  $("start-browser").disabled = !projectId;
+  $("plan-arc").disabled = !projectId;
+  loadWorkspaces();
+};
+$("start-browser").onclick = () => startBrowserWorkspace();
+$("plan-arc").onclick = () => planArc();
+
+fetch("./config.json", { cache: "no-store" })
+  .then(response => response.ok ? response.json() : Promise.reject(new Error("config unavailable")))
+  .then(render)
+  .catch(() => render(fallback));
+</script>
+</body>
+</html>

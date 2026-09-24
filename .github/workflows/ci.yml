@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests:
     name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
@@ -29,12 +33,12 @@ jobs:
       - name: Install runtime dependencies
         run: python -m pip install -r requirements.txt
       - name: Compile Python modules
-        run: python -m py_compile helper.py config.py state.py model_providers.py diagnostics.py ood.py workspace.py protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py errors.py version.py
+        run: python -m py_compile helper.py config.py state.py model_providers.py diagnostics.py ood.py workspace.py protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py identifiers.py errors.py version.py hosted_gateway/__init__.py hosted_gateway/config.py hosted_gateway/store.py hosted_gateway/server.py hosted_gateway/migrate.py hosted_gateway/admin.py deploy/kubernetes/__init__.py deploy/kubernetes/render.py
       - name: Run unit and reconnect tests
         run: python -m unittest discover -s . -p 'test_*.py' -v
 
   package-check:
-    name: Packaging source check
+    name: Gateway image, security, and packaging checks
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -45,28 +49,102 @@ jobs:
           python-version: '3.12'
       - name: Validate macOS build script syntax
         run: python -m py_compile macos/build.py macos/launcher.py distribution/build_bundles.py distribution/build_portable.py distribution/pyinstaller_runtime.py distribution/smoke_portable.py
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check Student Web JavaScript syntax
+        run: python distribution/check_student_js.py
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build standalone hosted gateway image
+        run: docker buildx build --load --file Dockerfile.gateway --tag arc-chat-gateway:ci .
+      - name: Generate gateway image SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          image: arc-chat-gateway:ci
+          format: spdx-json
+          output-file: arc-chat-gateway.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Scan gateway image and save the complete vulnerability report
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        id: gateway-scan
+        with:
+          image: arc-chat-gateway:ci
+          output-format: json
+          output-file: arc-chat-gateway-grype.json
+          fail-build: false
+          cache-db: true
+      - name: Block fixable high and critical gateway image vulnerabilities
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: arc-chat-gateway:ci
+          output-format: table
+          severity-cutoff: high
+          fail-build: true
+          only-fixed: true
+          cache-db: true
+      - name: Upload gateway SBOM and vulnerability report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-sbom-and-scan
+          path: |
+            arc-chat-gateway.spdx.json
+            arc-chat-gateway-grype.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Install OpenAPI validator
+        run: python -m pip install openapi-spec-validator==0.9.0
+      - name: Validate hosted gateway OpenAPI contract
+        run: python -m openapi_spec_validator docs/hosted-gateway-openapi.yaml
       - name: Verify packaged Python modules are declared
         shell: bash
         run: |
-          for file in helper.py config.py state.py model_providers.py diagnostics.py ood.py workspace.py protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py errors.py version.py arc-chat.html requirements.txt CONTRIBUTORS.md SECURITY.md SUPPORT.md; do
+          for file in helper.py config.py state.py model_providers.py diagnostics.py ood.py workspace.py protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py identifiers.py errors.py version.py arc-chat.html requirements.txt profiles.example.json applications.example.json CONTRIBUTORS.md SECURITY.md SUPPORT.md; do
             test -f "$file"
           done
       - name: Build Windows and Linux bootstrap bundles
         run: python distribution/build_bundles.py
+      - name: Build static student web bundle
+        run: python distribution/build_student_web.py
+      - name: Inspect student web bundle
+        run: |
+          unzip -l dist/ARC-Chat-Student-Web.zip
+          for file in index.html config.json README.md; do
+            unzip -l dist/ARC-Chat-Student-Web.zip | grep -q "$file"
+          done
       - name: Inspect bootstrap bundle contents
         run: |
           for archive in dist/ARC-Chat-Windows.zip dist/ARC-Chat-Linux.zip; do
             unzip -l "$archive"
-            for file in protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py errors.py version.py CONTRIBUTORS.md SECURITY.md SUPPORT.md; do
+            for file in protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py identifiers.py errors.py version.py applications.example.json CONTRIBUTORS.md SECURITY.md SUPPORT.md; do
               unzip -l "$archive" | grep -q "$file"
             done
           done
 
   integration:
-    name: Local Jupyter integration
+    name: Hosted gateway PostgreSQL and local Jupyter integration
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: arcchat
+          POSTGRES_PASSWORD: arcchat
+          POSTGRES_DB: arcchat_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U arcchat -d arcchat_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/playwright-browsers
+      DATABASE_URL: postgresql://arcchat:arcchat@localhost:5432/arcchat_test
+      ARC_CHAT_TEST_DATABASE_URL: postgresql://arcchat:arcchat@localhost:5432/arcchat_test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -76,7 +154,11 @@ jobs:
           python-version: '3.12'
           cache: pip
       - name: Install runtime/integration dependencies
-        run: python -m pip install -r requirements.txt -r requirements-test.txt
+        run: python -m pip install -r requirements.txt -r requirements-test.txt -r requirements-gateway.txt
+      - name: Apply PostgreSQL migrations to the fresh service database
+        run: python -m hosted_gateway.migrate
+      - name: Run PostgreSQL-backed gateway acceptance tests
+        run: python -m unittest -v test_postgres_gateway
       - name: Install Chromium and Linux browser dependencies
         run: python -m playwright install --with-deps chromium
       - name: Run real local Jupyter/UI integration

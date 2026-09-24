@@ -1,0 +1,572 @@
+openapi: 3.1.0
+info:
+  title: ARC Chat Hosted Gateway
+  version: 0.5.0
+  description: Authenticated project and workspace API. Provider mutations require an approved server-side adapter.
+servers:
+  - url: https://gateway.example.invalid
+    description: Replace with the operator-approved HTTPS origin.
+security:
+  - sessionCookie: []
+paths:
+  /health/live:
+    get:
+      security: []
+      summary: Process liveness
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { const: live } } }
+  /health/ready:
+    get:
+      security: []
+      summary: Database readiness
+      responses:
+        "200": { description: PostgreSQL is reachable }
+        "503": { description: Database is unavailable }
+  /metrics:
+    get:
+      security: []
+      summary: Aggregate request metrics
+      responses:
+        "200":
+          description: Prometheus text exposition; restrict network access to monitoring.
+          content:
+            text/plain:
+              schema: { type: string }
+  /api/v1/session:
+    get:
+      summary: Read authenticated session and CSRF state
+      responses:
+        "200":
+          description: Session snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionSnapshot" }
+        "401": { $ref: "#/components/responses/ApiError" }
+  /api/v1/projects:
+    get:
+      summary: List projects authorized for this identity
+      responses:
+        "200":
+          description: Project list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Project" } }
+  /api/v1/projects/{project_id}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      summary: Read an authorized project
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "404": { $ref: "#/components/responses/ApiError" }
+  /api/v1/providers:
+    get:
+      summary: List available and planned providers
+      responses:
+        "200":
+          description: Provider list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Provider" } }
+  /api/v1/applications:
+    get:
+      summary: List visible application manifests
+      parameters:
+        - in: query
+          name: project_id
+          schema: { $ref: "#/components/schemas/ProjectId" }
+      responses:
+        "200":
+          description: Application manifests
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Application" } }
+  /api/v1/applications/{application_id}:
+    parameters:
+      - $ref: "#/components/parameters/ApplicationId"
+    get:
+      summary: Read an authorized application manifest
+      responses:
+        "200":
+          description: Application manifest
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Application" }
+        "404": { $ref: "#/components/responses/ApiError" }
+  /api/v1/applications/{application_id}/plan:
+    parameters:
+      - $ref: "#/components/parameters/ApplicationId"
+    post:
+      summary: Plan an application without provisioning
+      description: Requires the session CSRF header. Returns executed=false.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: Non-mutating deployment plan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan: { $ref: "#/components/schemas/DeploymentPlan" }
+                  executed: { const: false }
+        "403": { $ref: "#/components/responses/ApiError" }
+  /api/v1/placement:
+    post:
+      summary: Plan a workload without provisioning
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PlacementRequest" }
+      responses:
+        "200":
+          description: Placement review; executed=false
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PlacementDecision"
+                  - type: object
+                    properties:
+                      executed: { const: false }
+  /api/v1/workspaces:
+    get:
+      summary: List authorized workspaces
+      parameters:
+        - in: query
+          name: project_id
+          schema: { $ref: "#/components/schemas/ProjectId" }
+      responses:
+        "200":
+          description: Workspace list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Workspace" } }
+    post:
+      summary: Create a browser workspace record
+      description: This records a link to static JupyterLite; it does not provision a remote kernel.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WorkspaceCreateRequest" }
+      responses:
+        "201":
+          description: Browser workspace record created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workspace: { $ref: "#/components/schemas/Workspace" }
+        "409": { $ref: "#/components/responses/ApiError" }
+        "503": { $ref: "#/components/responses/ApiError" }
+  /api/v1/workspaces/resolve:
+    post:
+      summary: Resolve resources persisted by a trusted provider adapter
+      description: The client cannot submit provider candidates. Resolution needs the session CSRF header.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResolutionRequest" }
+      responses:
+        "200":
+          description: Provider-neutral resolution decision
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResolutionDecision" }
+        "400": { $ref: "#/components/responses/ApiError" }
+  /api/v1/workspaces/{workspace_id}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    get:
+      summary: Read an authorized workspace
+      responses:
+        "200":
+          description: Workspace state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Workspace" }
+        "404": { $ref: "#/components/responses/ApiError" }
+  /api/v1/workspaces/{workspace_id}/stop:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    post:
+      summary: Close a browser workspace record
+      description: Does not terminate an already-open JupyterLite browser kernel.
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Workspace record closed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workspace: { $ref: "#/components/schemas/Workspace" }
+        "404": { $ref: "#/components/responses/ApiError" }
+        "503": { $ref: "#/components/responses/ApiError" }
+  /api/v1/workspaces/{workspace_id}/jobs:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    get:
+      summary: List authorized jobs linked to a workspace
+      responses:
+        "200":
+          description: Job list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Job" } }
+  /api/v1/jobs/{job_id}:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    get:
+      summary: Read an authorized job summary
+      responses:
+        "200":
+          description: Job summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "404": { $ref: "#/components/responses/ApiError" }
+  /api/v1/jobs/{job_id}/logs:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    get:
+      summary: Read job logs when a provider adapter is enabled
+      responses:
+        "503": { $ref: "#/components/responses/ApiError" }
+  /api/v1/jobs/{job_id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/JobId"
+    post:
+      summary: Cancel a job when a provider adapter is enabled
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "503": { $ref: "#/components/responses/ApiError" }
+  /api/v1/artifacts:
+    get:
+      summary: List authorized artifact metadata
+      parameters:
+        - in: query
+          name: project_id
+          schema: { $ref: "#/components/schemas/ProjectId" }
+      responses:
+        "200":
+          description: Artifact list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Artifact" } }
+  /api/v1/deployments:
+    get:
+      summary: List authorized deployment metadata
+      parameters:
+        - in: query
+          name: project_id
+          schema: { $ref: "#/components/schemas/ProjectId" }
+      responses:
+        "200":
+          description: Deployment list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Deployment" } }
+  /api/v1/events:
+    get:
+      summary: Stream authorized project events
+      parameters:
+        - in: header
+          name: Last-Event-ID
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: Server-sent events; reconnect with the last event sequence.
+          content:
+            text/event-stream:
+              schema: { type: string }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-arcchat-oauth
+  parameters:
+    ProjectId:
+      in: path
+      name: project_id
+      required: true
+      schema: { $ref: "#/components/schemas/ProjectId" }
+    ApplicationId:
+      in: path
+      name: application_id
+      required: true
+      schema: { type: string, pattern: "^app_[0-9a-f]{32}$" }
+    WorkspaceId:
+      in: path
+      name: workspace_id
+      required: true
+      schema: { $ref: "#/components/schemas/WorkspaceId" }
+    JobId:
+      in: path
+      name: job_id
+      required: true
+      schema: { type: string, pattern: "^job_[0-9a-f]{32}$" }
+    CsrfToken:
+      in: header
+      name: X-CSRF-Token
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      schema: { type: string, minLength: 16, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }
+  responses:
+    ApiError:
+      description: Structured API error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+  schemas:
+    ProjectId:
+      type: string
+      pattern: "^prj_[0-9a-f]{32}$"
+    WorkspaceId:
+      type: string
+      pattern: "^ws_[0-9a-f]{32}$"
+    SessionSnapshot:
+      type: object
+      required: [authenticated, user, projects, capabilities, csrf_token]
+      properties:
+        authenticated: { const: true }
+        user:
+          type: object
+          properties:
+            id: { type: string, pattern: "^usr_[0-9a-f]{32}$" }
+            display_name: { type: string }
+        projects: { type: array, items: { $ref: "#/components/schemas/ProjectId" } }
+        capabilities:
+          type: object
+          additionalProperties: { type: boolean }
+        csrf_token: { type: string }
+    Project:
+      type: object
+      required: [id, slug, name, allowed_providers, role]
+      properties:
+        id: { $ref: "#/components/schemas/ProjectId" }
+        slug: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        audience: { type: string }
+        allowed_providers: { type: array, items: { type: string } }
+        default_provider: { type: string }
+        data_classification: { type: string }
+        role: { type: string }
+    Provider:
+      type: object
+      required: [id, label, modes, status]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        modes: { type: array, items: { type: string } }
+        status: { type: string, enum: [available, experimental, planned, disabled] }
+        supports_gpu: { type: boolean }
+        supports_server_packages: { type: boolean }
+        supports_persistent_service: { type: boolean }
+        launch_url: { type: string, format: uri }
+    Application:
+      type: object
+      required: [id, project_id, name, application_type, provider]
+      properties:
+        id: { type: string, pattern: "^app_[0-9a-f]{32}$" }
+        project_id: { $ref: "#/components/schemas/ProjectId" }
+        name: { type: string }
+        application_type: { type: string }
+        runtime: { type: string }
+        provider: { type: string }
+        audience: { type: string }
+        entrypoint: { type: string }
+        metadata: { type: object, additionalProperties: { type: [string, integer, number, boolean, "null"] } }
+    PlacementRequest:
+      type: object
+      required: [project_id]
+      additionalProperties: false
+      properties:
+        project_id: { $ref: "#/components/schemas/ProjectId" }
+        mode: { type: string, enum: [browser, interactive, batch, service], default: interactive }
+        preferred_provider: { type: string, default: auto }
+        needs_gpu: { type: boolean }
+        requires_server_packages: { type: boolean }
+        persistent_service: { type: boolean }
+        estimated_input_mb: { type: integer, minimum: 0 }
+    PlacementDecision:
+      type: object
+      properties:
+        provider_id: { type: string }
+        action: { type: string, enum: [use, review] }
+        reason: { type: string }
+        confidence: { type: string }
+        requires_review: { type: boolean }
+        executed: { const: false }
+    DeploymentPlan:
+      type: object
+      properties:
+        application_id: { type: string }
+        project_id: { $ref: "#/components/schemas/ProjectId" }
+        provider_id: { type: string }
+        action: { type: string }
+        reason: { type: string }
+        confidence: { type: string }
+        requires_review: { type: boolean }
+    WorkspaceCreateRequest:
+      type: object
+      required: [project_id, provider_id]
+      additionalProperties: false
+      properties:
+        project_id: { $ref: "#/components/schemas/ProjectId" }
+        provider_id: { const: browser }
+        application_id: { type: string, pattern: "^app_[0-9a-f]{32}$" }
+        display_name: { type: string, minLength: 1, maxLength: 160 }
+        reviewed_request_id: { type: string }
+    Workspace:
+      type: object
+      required: [id, project_id, provider_id, state]
+      properties:
+        id: { $ref: "#/components/schemas/WorkspaceId" }
+        project_id: { $ref: "#/components/schemas/ProjectId" }
+        provider_id: { type: string }
+        state: { type: string }
+        display_name: { type: string }
+        launch_url: { type: string, format: uri }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        metadata: { type: object, additionalProperties: { type: [string, integer, number, boolean, "null"] } }
+    ResolutionRequest:
+      type: object
+      required: [project_id]
+      additionalProperties: false
+      properties:
+        project_id: { $ref: "#/components/schemas/ProjectId" }
+        workspace_id: { $ref: "#/components/schemas/WorkspaceId" }
+        provider_id: { type: string }
+        expectation:
+          type: object
+          additionalProperties: false
+          properties:
+            workspace_id: { $ref: "#/components/schemas/WorkspaceId" }
+            allocation: { type: string }
+            application_type: { type: string }
+            job_name: { type: string }
+            expected_state: { type: string }
+            cluster: { type: string }
+            provider: { type: string }
+            created_after: { type: string, format: date-time }
+    ResolutionDecision:
+      type: object
+      required: [action, resource_id, confidence, reason, candidates]
+      properties:
+        action: { type: string, enum: [reuse, wait, choose, start] }
+        resource_id: { type: string }
+        confidence: { type: string }
+        reason: { type: string }
+        evidence: { type: array, items: { type: string } }
+        candidates: { type: array, items: { $ref: "#/components/schemas/ResourceCandidate" } }
+    ResourceCandidate:
+      type: object
+      properties:
+        resource_id: { type: string, pattern: "^prsrc_[0-9a-f]{32}$" }
+        provider_resource_id: { type: string, pattern: "^prsrc_[0-9a-f]{32}$" }
+        state: { type: string }
+        name: { type: string }
+        provider: { type: string }
+        kind: { type: string }
+        project_id: { $ref: "#/components/schemas/ProjectId" }
+        workspace_id: { type: string }
+        created_at: { type: string }
+        cluster: { type: string }
+    Job:
+      type: object
+      properties:
+        id: { type: string, pattern: "^job_[0-9a-f]{32}$" }
+        workspace_id: { $ref: "#/components/schemas/WorkspaceId" }
+        provider_id: { type: string }
+        state: { type: string }
+        name: { type: string }
+        submitted_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+    Artifact:
+      type: object
+      properties:
+        id: { type: string, pattern: "^art_[0-9a-f]{32}$" }
+        project_id: { $ref: "#/components/schemas/ProjectId" }
+        workspace_id: { type: string }
+        type: { type: string }
+        media_type: { type: string }
+        content_sha256: { type: string }
+        created_at: { type: string, format: date-time }
+    Deployment:
+      type: object
+      properties:
+        id: { type: string, pattern: "^dep_[0-9a-f]{32}$" }
+        project_id: { $ref: "#/components/schemas/ProjectId" }
+        application_id: { type: string, pattern: "^app_[0-9a-f]{32}$" }
+        provider_id: { type: string }
+        environment: { type: string }
+        state: { type: string }
+        image_digest: { type: string }
+        endpoint_id: { type: string }
+    ApiError:
+      type: object
+      required: [error_version, code, message, request_id, recovery_action]
+      properties:
+        error_version: { const: 1 }
+        code: { type: string }
+        message: { type: string }
+        request_id: { type: string }
+        recovery_action: { type: string }
