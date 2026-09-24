@@ -25,9 +25,33 @@ def _https_url(value: str, label: str) -> str:
     if not value:
         return ""
     parsed = urlsplit(value)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+    try:
+        parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{label} has an invalid port.") from exc
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None or parsed.password is not None
+            or (label == "notebook_url" and (parsed.query or parsed.fragment))):
         raise ValueError(f"{label} must be a public HTTPS URL without embedded credentials.")
     return value
+
+
+def _https_origin(value: str, label: str) -> str:
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    parsed = urlsplit(value)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None or parsed.password is not None
+            or parsed.path not in {"", "/"} or parsed.query or parsed.fragment):
+        raise ValueError(f"{label} must be an HTTPS origin without a path or credentials.")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{label} has an invalid port.") from exc
+    hostname = parsed.hostname.lower()
+    if ":" in hostname:
+        hostname = f"[{hostname}]"
+    authority = hostname if port in (None, 443) else f"{hostname}:{port}"
+    return f"https://{authority}"
 
 
 def validate_config(value: object) -> dict:
@@ -45,6 +69,7 @@ def validate_config(value: object) -> dict:
     if not title or len(title) > 120:
         raise ValueError("Student web title must be 1-120 characters.")
     notebook_url = _https_url(str(value.get("notebook_url") or ""), "notebook_url")
+    gateway_url = _https_origin(str(value.get("gateway_url") or ""), "gateway_url")
     apps = value.get("applications")
     if not isinstance(apps, list):
         raise ValueError("applications must be a list.")
@@ -62,7 +87,16 @@ def validate_config(value: object) -> dict:
             _https_url(str(app.get("url") or ""), f"application {app_id} URL")
     if any(app.get("view") == "notebook" and app.get("enabled", True) is not False for app in apps) and not notebook_url:
         raise ValueError("Enabled notebook application requires notebook_url.")
+    value["gateway_url"] = gateway_url
     return value
+
+
+def _index_with_gateway_csp(index_html: str, gateway_url: str) -> str:
+    marker = "__GATEWAY_ORIGIN__"
+    if index_html.count(marker) != 1:
+        raise ValueError("Student index must include exactly one gateway CSP marker.")
+    origin = _https_origin(gateway_url, "gateway_url") or "'none'"
+    return index_html.replace(marker, origin)
 
 
 def build_archive(output_dir: Path = DEFAULT_DIST) -> tuple[Path, Path]:
@@ -81,6 +115,10 @@ def build_archive(output_dir: Path = DEFAULT_DIST) -> tuple[Path, Path]:
             public_text = source.read_text(encoding="utf-8")
             if FORBIDDEN_PUBLIC_RUNTIME_RE.search(public_text):
                 raise ValueError(f"{name} references the private loopback/runtime control surface.")
+            if name == "index.html":
+                public_text = _index_with_gateway_csp(public_text, config.get("gateway_url", ""))
+                (stage / name).write_text(public_text, encoding="utf-8")
+                continue
         shutil.copy2(source, stage / name)
 
     # Re-serialize validated JSON for deterministic public deployment output.

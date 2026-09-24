@@ -33,7 +33,7 @@ jobs:
       - name: Install runtime dependencies
         run: python -m pip install -r requirements.txt
       - name: Compile Python modules
-        run: python -m py_compile helper.py config.py state.py model_providers.py diagnostics.py ood.py workspace.py protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py errors.py version.py
+        run: python -m py_compile helper.py config.py state.py model_providers.py diagnostics.py ood.py workspace.py protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py identifiers.py errors.py version.py hosted_gateway/__init__.py hosted_gateway/config.py hosted_gateway/store.py hosted_gateway/server.py hosted_gateway/migrate.py hosted_gateway/admin.py deploy/kubernetes/__init__.py deploy/kubernetes/render.py
       - name: Run unit and reconnect tests
         run: python -m unittest discover -s . -p 'test_*.py' -v
 
@@ -49,10 +49,18 @@ jobs:
           python-version: '3.12'
       - name: Validate macOS build script syntax
         run: python -m py_compile macos/build.py macos/launcher.py distribution/build_bundles.py distribution/build_portable.py distribution/pyinstaller_runtime.py distribution/smoke_portable.py
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check Student Web JavaScript syntax
+        run: python distribution/check_student_js.py
+      - name: Build standalone hosted gateway image
+        run: docker build --file Dockerfile.gateway --tag arc-chat-gateway:ci .
       - name: Verify packaged Python modules are declared
         shell: bash
         run: |
-          for file in helper.py config.py state.py model_providers.py diagnostics.py ood.py workspace.py protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py errors.py version.py arc-chat.html requirements.txt profiles.example.json applications.example.json CONTRIBUTORS.md SECURITY.md SUPPORT.md; do
+          for file in helper.py config.py state.py model_providers.py diagnostics.py ood.py workspace.py protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py identifiers.py errors.py version.py arc-chat.html requirements.txt profiles.example.json applications.example.json CONTRIBUTORS.md SECURITY.md SUPPORT.md; do
             test -f "$file"
           done
       - name: Build Windows and Linux bootstrap bundles
@@ -69,7 +77,7 @@ jobs:
         run: |
           for archive in dist/ARC-Chat-Windows.zip dist/ARC-Chat-Linux.zip; do
             unzip -l "$archive"
-            for file in protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py errors.py version.py applications.example.json CONTRIBUTORS.md SECURITY.md SUPPORT.md; do
+            for file in protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py identifiers.py errors.py version.py applications.example.json CONTRIBUTORS.md SECURITY.md SUPPORT.md; do
               unzip -l "$archive" | grep -q "$file"
             done
           done

@@ -57,6 +57,8 @@ Execution targets are modeled as providers rather than hard-coded UI paths. The 
 
 The static shell under [`web/student/`](web/student/) is designed for VT Domains-style hosting and contains no credentials or ARC session state. It now embeds the FL 2744 JupyterLite deployment as a live Notebook tab and is packaged as `ARC-Chat-Student-Web.zip` by CI/release builds. The built-in FL 2744 profile exposes that JupyterLite deployment as a public browser-compute launch target. See [`docs/CLAHS_PLATFORM_FOUNDATIONS.md`](docs/CLAHS_PLATFORM_FOUNDATIONS.md) and [`docs/HOSTED_GATEWAY.md`](docs/HOSTED_GATEWAY.md) for the control-plane and hosted-service boundaries.
 
+The optional hosted gateway now has an aiohttp API, PostgreSQL migrations, an OIDC-proxy boundary, course-group authorization, and a Kubernetes manifest renderer. It is not deployed to Virginia Tech infrastructure. The student client’s `gateway_url` remains blank in the checked-in public configuration, and hosted ARC mutations stay disabled pending an ARC-approved delegation API. See [`docs/HOSTED_GATEWAY.md`](docs/HOSTED_GATEWAY.md) for the deployment gates and current limitations.
+
 ## Connect and work
 
 1. Enable VT VPN if needed and click **Open ARC & sign in** in Student Mode. Complete VT credentials and MFA in the visible Chromium window.

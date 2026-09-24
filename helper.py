@@ -18,7 +18,6 @@ from ood import OODBrowserAdapter
 from protocol import CommandEnvelope, PROTOCOL_VERSION, ReplayCache
 from projects import ProjectRegistry, stable_resource_id
 from providers import PlacementRequest
-from resolver import ResourceResolver
 from security import redact_text
 from services import EndpointRegistry, SshTunnel, VllmServiceManager, VllmServiceSpec
 from state import AppState, AppStateMachine, InvalidTransition
@@ -175,8 +174,6 @@ class Bridge:
         self.project_registry = self.control_plane.projects
         self.workspace_registry = self.control_plane.workspaces
         self.provider_registry = self.control_plane.providers
-        self.placement_engine = self.control_plane.placement
-        self.resource_resolver = self.control_plane.resolver
         project = self.control_plane.current_project()
         if (
             self.last_job_id
@@ -1068,12 +1065,28 @@ class Bridge:
             job_id = await backend.submit(spec)
             self.last_job_id = job_id
             self.job_history.record_submission(job_id, spec)
-            current_project = self.project_registry.current()
-            if current_project:
-                current_project.link('job', job_id, active=True)
+            self.control_plane.associate_resource(
+                job_id,
+                provider_id='arc',
+                kind='job',
+                display_name=spec.name,
+                metadata={'application_type':'slurm-job', 'cluster':'Falcon'},
+            )
             self.persist_recovery_state()
             await self.emit('job', item={'job_id':job_id, 'state':'SUBMITTED', 'name':spec.name})
             return f'Submitted Slurm job {job_id}. No compute command was run on the login node.'
+        if action=='associate_resource':
+            workspace = self.control_plane.associate_resource(
+                str(d.get('resource_id') or d.get('job_id') or '').strip(),
+                provider_id=str(d.get('provider_id') or 'arc').strip(),
+                kind=str(d.get('kind') or 'job').strip(),
+                workspace_id=str(d.get('workspace_id') or '').strip(),
+                display_name=str(d.get('display_name') or ''),
+                metadata=d.get('metadata') if isinstance(d.get('metadata'), dict) else None,
+            )
+            self.persist_recovery_state()
+            await self.emit('workspace', item=workspace.public_dict())
+            return 'Resource associated with the selected project and saved for future recovery.'
         if action=='job_list':
             items = await self.slurm_backend(d).list_active()
             for item in items:

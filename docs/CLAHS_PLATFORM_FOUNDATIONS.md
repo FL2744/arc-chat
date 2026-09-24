@@ -1,6 +1,6 @@
 # CLAHS Research Application Foundations
 
-Status: implementation foundation, not an institutional service claim.
+Status: the v0.5 control-plane foundation and hosted gateway implementation are present in this repository. Institutional provider integrations and deployment remain external activation work.
 
 ## Goal
 
@@ -45,21 +45,25 @@ ARC Chat already persisted a previous Jupyter base/notebook. The helper now trea
 
 ## Student web surface
 
-`web/student/` is a static, VT-Domains-friendly shell. It contains no secrets and can point to JupyterLite immediately. A hosted ARC launcher can be added later without changing the student information architecture.
+`web/student/` is a static, VT-Domains-friendly shell. It contains no secrets, embeds the configured JupyterLite site, and can call the optional hosted API when its public `gateway_url` is set and the gateway’s CORS/CSP origins match. The Projects view supports OIDC sign-in, authorized project selection, browser-workspace records, and ARC placement review. ARC execution stays disabled until the supported provider path is approved and configured.
 
 ## Security/institutional boundaries
 
 - no MFA bypass;
 - no password/cookie persistence in project records;
 - no automatic provisioning of planned Common Platform/cloud targets;
+- no hosted ARC mutations or provider credential handling;
+- no student research-file storage in the hosted gateway;
 - no guessing between ambiguous ARC resources;
 - no mutation through the external integration API;
 - existing explicit review boundaries for code execution and resource creation remain intact.
 
 ## Next integration milestones
 
-1. Validate prior-workspace reachability/recovery against live ARC/OOD.
-2. Add OOD session metadata extraction so active interactive sessions become resolver candidates without relying on fragile DOM ordering.
-3. Host the static student shell on the provided VT Domains account and keep large/user research data off that host.
-4. Validate the Common Platform tenant/onboarding path with CLAHS IT/central IT before implementing a deployment provider.
-5. Treat AWS/cloud as another provider behind the same application manifest rather than a separate product.
+1. Obtain a Common Platform tenant, PostgreSQL, Vault/External Secrets, ingress, DNS, TLS, and approved network ranges.
+2. Register and verify the OIDC client, immutable subject, `mailPreferredAddress`, and `targetedMembership` claim mapping.
+3. Host the static student shell on the provided VT Domains account and configure the exact gateway origin.
+4. Validate prior-workspace recovery and provider metadata against live ARC/OOD.
+5. Obtain ARC’s supported user-delegated job/session API before enabling hosted ARC mutation.
+6. Add Common Platform app deployment, user-data quotas/retention, and operational runbooks after tenant onboarding.
+7. Treat direct AWS/cloud as another provider behind the same application manifest only if an approved workload needs it.

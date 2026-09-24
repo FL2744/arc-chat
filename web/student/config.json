@@ -3,6 +3,7 @@
   "title": "FL 2744 Compute",
   "subtitle": "Start small in the browser. Use ARC when the work actually needs research compute.",
   "notebook_url": "https://fl2744.github.io/jupyterlite/lab/index.html",
+  "gateway_url": "",
   "applications": [
     {
       "id": "jupyterlite",

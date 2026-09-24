@@ -14,6 +14,8 @@ import re
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Mapping
 
+from security import validate_public_metadata
+
 
 PROJECT_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 RESOURCE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -65,18 +67,7 @@ class ProjectManifest:
         object.__setattr__(self, "allowed_providers", providers)
         if self.default_provider != "auto" and self.default_provider not in providers:
             raise ValueError("default_provider must be auto or listed in allowed_providers.")
-        if not isinstance(self.metadata, dict):
-            raise ValueError("Project metadata must be an object.")
-        safe_metadata: dict[str, Any] = {}
-        for key, value in self.metadata.items():
-            if not isinstance(key, str) or not key or len(key) > 80:
-                raise ValueError("Project metadata keys must be short strings.")
-            if not isinstance(value, (str, int, float, bool, type(None))):
-                raise ValueError("Project metadata values must be scalar JSON values.")
-            if isinstance(value, str) and len(value) > 1000:
-                raise ValueError("Project metadata text is too long.")
-            safe_metadata[key] = value
-        object.__setattr__(self, "metadata", safe_metadata)
+        object.__setattr__(self, "metadata", validate_public_metadata(self.metadata, label="Project metadata"))
 
     def public_dict(self) -> dict[str, Any]:
         data = asdict(self)

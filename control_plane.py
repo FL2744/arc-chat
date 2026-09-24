@@ -8,7 +8,7 @@ from apps import ApplicationManifest, ApplicationRegistry, DeploymentPlan, load_
 from config import CourseProfile
 from projects import ProjectManifest, ProjectRecord, ProjectRegistry
 from providers import PlacementDecision, PlacementEngine, PlacementRequest, ProviderRegistry, default_provider_registry
-from resolver import ResolutionDecision, ResourceCandidate, ResourceResolver
+from resolver import ResolutionDecision, ResourceCandidate, ResourceExpectation, ResourceResolver
 from workspaces import WorkspaceRecord, WorkspaceRegistry
 
 
@@ -126,7 +126,70 @@ class ControlPlane:
                     for item in candidates
                 ),
             )
-        return self.resolver.resolve(project, candidates)
+        current = self.workspaces.current()
+        expected = ResourceExpectation(
+            workspace_id=current.id if current and current.project_id == project.manifest.id else "",
+            owner_id=current.owner_id if current and current.project_id == project.manifest.id else "",
+        )
+        return self.resolver.resolve(
+            project,
+            candidates,
+            workspaces=self.workspaces.list(project_id=project.manifest.id),
+            expected=expected,
+        )
+
+    def associate_resource(
+        self,
+        resource_id: str,
+        *,
+        provider_id: str = "arc",
+        kind: str = "job",
+        workspace_id: str = "",
+        display_name: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> WorkspaceRecord:
+        """Persist an explicit user-selected provider-resource association."""
+        project = self.current_project()
+        if not project:
+            raise ValueError("Select a project before associating a resource.")
+        if provider_id not in project.manifest.allowed_providers:
+            raise ValueError("Resource provider is not allowed for the current project.")
+        self.providers.get(provider_id)
+        resource_id = str(resource_id or "").strip()
+        if not resource_id:
+            raise ValueError("Resource id cannot be empty.")
+        if workspace_id:
+            try:
+                workspace = self.workspaces.get(workspace_id)
+            except KeyError as exc:
+                raise ValueError("Selected workspace does not belong to this project/provider.") from exc
+            if workspace.project_id != project.manifest.id or workspace.provider_id != provider_id:
+                raise ValueError("Selected workspace does not belong to this project/provider.")
+        else:
+            workspace_id = stable_workspace_id(provider_id, kind, resource_id)
+            workspace = self.ensure_workspace(
+                workspace_id=workspace_id,
+                provider_id=provider_id,
+                kind="batch" if kind == "job" else "interactive",
+                state="queued",
+                display_name=display_name or f"{provider_id} {kind}",
+                metadata=metadata,
+            )
+        workspace.link(kind, resource_id)
+        if kind == "job":
+            project.link("job", resource_id, active=True)
+        elif kind == "endpoint":
+            project.link("endpoint", resource_id, active=True)
+        elif kind == "artifact":
+            project.link("artifact", resource_id)
+        elif kind == "deployment":
+            project.link("deployment", resource_id)
+        elif kind == "provider_resource":
+            workspace.link("provider_resource", resource_id)
+        else:
+            raise ValueError("Unsupported provider-resource association kind.")
+        self.workspaces.set_current(workspace.id)
+        return workspace
 
     def snapshot(self) -> dict[str, Any]:
         project = self.current_project()
@@ -137,3 +200,10 @@ class ControlPlane:
             "providers": self.providers.public_dicts(),
             "applications": self.applications.public_dicts(project_id=project.manifest.id if project else ""),
         }
+
+
+def stable_workspace_id(provider_id: str, kind: str, resource_id: str) -> str:
+    """Return a non-secret stable workspace ID for an explicitly linked resource."""
+    from projects import stable_resource_id
+
+    return stable_resource_id("workspace", f"{provider_id}:{kind}:{resource_id}")

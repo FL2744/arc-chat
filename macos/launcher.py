@@ -74,7 +74,7 @@ with open(log_path, 'a') as log:
         # Keep serving files from a stable path even if the .app is moved.
         app_files=support/'app'
         app_files.mkdir(exist_ok=True)
-        for name in ('helper.py','arc-chat.html','config.py','state.py','model_providers.py','diagnostics.py','ood.py','workspace.py','protocol.py','security.py','context_window.py','artifacts.py','jobs.py','services.py','integration.py','errors.py','version.py','CONTRIBUTORS.md','SUPPORT.md','SECURITY.md'):
+        for name in ('helper.py','arc-chat.html','requirements.txt','config.py','state.py','model_providers.py','diagnostics.py','ood.py','workspace.py','protocol.py','security.py','context_window.py','artifacts.py','jobs.py','services.py','integration.py','projects.py','providers.py','resolver.py','workspaces.py','control_plane.py','apps.py','identifiers.py','errors.py','version.py','profiles.example.json','applications.example.json','CONTRIBUTORS.md','SUPPORT.md','SECURITY.md'):
             shutil.copy2(resources/name,app_files/name)
         result = subprocess.run([str(python),str(app_files/'helper.py')],cwd=support,env=env,stdout=log,stderr=log)
         if result.returncode:

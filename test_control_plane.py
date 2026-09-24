@@ -70,6 +70,20 @@ class ControlPlaneTests(unittest.TestCase):
         ])
         self.assertEqual((decision.action, decision.resource_id), ("reuse", "777"))
 
+    def test_explicit_resource_selection_persists_project_and_workspace_association(self):
+        plane = ControlPlane.for_profile(get_profile("fl2744"))
+        workspace = plane.associate_resource(
+            "98765", provider_id="arc", kind="job", display_name="Selected ARC job",
+        )
+        self.assertIn("98765", workspace.job_ids)
+        self.assertIn("98765", plane.current_project().job_ids)
+        decision = plane.resolve([{"job_id": "98765", "state": "RUNNING"}])
+        self.assertEqual((decision.action, decision.resource_id, decision.confidence), ("reuse", "98765", "high"))
+        with self.assertRaisesRegex(ValueError, "does not belong"):
+            plane.associate_resource(
+                "98766", provider_id="arc", kind="job", workspace_id="ws_ffffffffffffffffffffffffffffffff",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from providers import PlacementDecision, PlacementRequest
+from security import validate_public_metadata
 
 
 APP_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
@@ -49,18 +50,7 @@ class ApplicationManifest:
             raise ValueError("estimated_input_mb cannot be negative.")
         if "\x00" in self.entrypoint or len(self.entrypoint) > 500:
             raise ValueError("Invalid application entrypoint.")
-        if not isinstance(self.metadata, dict):
-            raise ValueError("Application metadata must be an object.")
-        safe_metadata: dict[str, Any] = {}
-        for key, value in self.metadata.items():
-            if not isinstance(key, str) or not key or len(key) > 80:
-                raise ValueError("Application metadata keys must be short strings.")
-            if not isinstance(value, (str, int, float, bool, type(None))):
-                raise ValueError("Application metadata values must be scalar JSON values.")
-            if isinstance(value, str) and len(value) > 1000:
-                raise ValueError("Application metadata text is too long.")
-            safe_metadata[key] = value
-        object.__setattr__(self, "metadata", safe_metadata)
+        object.__setattr__(self, "metadata", validate_public_metadata(self.metadata, label="Application metadata"))
 
     def placement_request(self) -> PlacementRequest:
         mode = "browser" if self.application_type == "static" else self.application_type
@@ -127,6 +117,23 @@ class ApplicationRegistry:
 
     def public_dicts(self, *, project_id: str = "") -> list[dict[str, Any]]:
         return [item.public_dict() for item in self.list(project_id=project_id)]
+
+    def export_records(self) -> list[dict[str, Any]]:
+        return self.public_dicts()
+
+    @classmethod
+    def from_records(cls, values: Any, *, limit: int = 500) -> "ApplicationRegistry":
+        registry = cls()
+        if not isinstance(values, list):
+            return registry
+        for value in values[-max(1, min(5000, int(limit))):]:
+            if not isinstance(value, Mapping):
+                continue
+            try:
+                registry.register(_manifest_from_mapping(value))
+            except (TypeError, ValueError):
+                continue
+        return registry
 
 
 def _manifest_from_mapping(value: Mapping[str, Any]) -> ApplicationManifest:

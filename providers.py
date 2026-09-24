@@ -92,6 +92,29 @@ class ProviderRegistry:
     def public_dicts(self) -> list[dict[str, Any]]:
         return [item.public_dict() for item in self.list()]
 
+    def export_records(self) -> list[dict[str, Any]]:
+        return self.public_dicts()
+
+    @classmethod
+    def from_records(cls, values: Any, *, limit: int = 100) -> "ProviderRegistry":
+        registry = cls()
+        if not isinstance(values, list):
+            return registry
+        allowed = {"id", "label", "modes", "status", "supports_gpu", "supports_server_packages",
+                   "supports_persistent_service", "recommended_inline_mb", "launch_url", "notes"}
+        for value in values[-max(1, min(500, int(limit))):]:
+            if not isinstance(value, dict):
+                continue
+            try:
+                if set(value) - allowed:
+                    continue
+                fields = {key: value[key] for key in allowed if key in value}
+                fields["modes"] = tuple(fields.get("modes") or ())
+                registry.register(ProviderDescriptor(**fields))
+            except (TypeError, ValueError):
+                continue
+        return registry
+
 
 class PlacementEngine:
     """Small deterministic policy engine; it never provisions resources itself."""

@@ -1,0 +1,25 @@
+# Multi-stage, non-root gateway image. The default base is pinned to the
+# reviewed multi-architecture manifest digest; update it through dependency review.
+ARG PYTHON_BASE_IMAGE=python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
+
+FROM ${PYTHON_BASE_IMAGE} AS dependencies
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
+WORKDIR /build
+COPY requirements-gateway.txt ./requirements-gateway.txt
+RUN python -m pip wheel --wheel-dir=/wheels -r requirements-gateway.txt
+
+FROM ${PYTHON_BASE_IMAGE} AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app
+WORKDIR /app
+RUN groupadd --gid 10001 arcchat \
+    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin arcchat
+COPY --from=dependencies /wheels /wheels
+COPY requirements-gateway.txt ./requirements-gateway.txt
+RUN python -m pip install --no-index --find-links=/wheels -r requirements-gateway.txt \
+    && rm -rf /wheels requirements-gateway.txt
+COPY identifiers.py security.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py ./
+COPY hosted_gateway ./hosted_gateway
+USER 10001:10001
+EXPOSE 8080
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["python", "-m", "hosted_gateway.server"]

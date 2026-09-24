@@ -1,87 +1,104 @@
-# Hosted Gateway Boundary
+# Hosted Gateway
 
-Status: architecture contract only. No hosted ARC gateway is claimed to exist yet.
+Status: the gateway service, PostgreSQL schema, student client integration, and hardened Kubernetes renderer are implemented. No Virginia Tech tenant, authentication client, Vault path, public hostname, or provider delegation is configured by this repository.
 
-## Why this boundary exists
+The gateway is a separate service boundary. It does not relax the local helper’s loopback policy, proxy ARC cookies, collect VT passwords, or provision a research provider without an approved adapter.
 
-The current ARC Chat helper is intentionally bound to loopback and rejects external Host/Origin values. That protects local browser/Jupyter authority from unrelated websites. A page hosted on VT Domains must **not** be granted direct access to the local helper merely to make Student Mode look web-native.
+## Components
 
-The browser-first architecture therefore has two independent execution paths:
+- `hosted_gateway/server.py` serves the authenticated `/api/v1` API using the shared project, placement, application, and resource-resolution code.
+- `hosted_gateway/store.py` owns PostgreSQL queries, membership synchronization, idempotency, rate limits, audit events, and SSE event reads.
+- `hosted_gateway/migrations/0001_core.sql` creates canonical opaque IDs, projects, course-group membership, applications, workspaces, provider resources, jobs, artifacts, deployments, audit, and event tables.
+- `hosted_gateway/admin.py` provisions a project, its application manifests, and operator-mapped course groups from an administrator-owned JSON file.
+- `web/student/` supports sign-in, project selection, browser-workspace records, ARC placement review, and the existing static JupyterLite view when a gateway origin is configured.
+- `deploy/kubernetes/render.py` renders manifests only after receiving immutable image digests, exact origins, and explicit approved network ranges.
 
-1. **Browser/JupyterLite** — fully static and safe to host on VT Domains today.
-2. **ARC workspace** — continues through the local helper/OOD path until an institutionally supported hosted gateway is available.
+The static site’s public `gateway_url` must be an HTTPS origin. The bundle builder adds that exact origin to the student page’s Content Security Policy. The gateway separately allows only the configured static origin through CORS. Use related same-site hostnames where possible so browsers accept the secure cross-origin session cookie; third-party-cookie blocking can prevent a browser client and API on unrelated sites from sharing a session.
 
-A future hosted gateway is a server-side service, not a relaxed localhost policy.
+## API surface
 
-## Shared policy layer
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health/live`, `GET /health/ready`, `GET /metrics` | Liveness, PostgreSQL readiness, and scrape metrics |
+| `GET /api/v1/session` | Authenticated identity summary, project IDs, capability flags, and the CSRF token |
+| `GET /api/v1/projects`, `GET /api/v1/projects/{id}` | List and read the caller’s authorized projects |
+| `GET /api/v1/providers` | List available and planned providers |
+| `GET /api/v1/applications`, `GET /api/v1/applications/{id}` | List and read project application manifests |
+| `POST /api/v1/applications/{id}/plan`, `POST /api/v1/placement` | Review a provider choice without provisioning |
+| `GET /api/v1/workspaces`, `GET /api/v1/workspaces/{id}` | List and read authorized workspace records |
+| `POST /api/v1/workspaces` | Create a browser-workspace record when JupyterLite is configured |
+| `POST /api/v1/workspaces/resolve` | Resolve server-owned provider records; client-supplied candidates are rejected |
+| `POST /api/v1/workspaces/{id}/stop` | Close an explicitly selected browser-workspace record |
+| `GET /api/v1/workspaces/{id}/jobs`, `GET /api/v1/jobs/{id}` | Read authorized job summaries |
+| `GET /api/v1/jobs/{id}/logs`, `POST /api/v1/jobs/{id}/cancel` | Return a safe provider-unavailable response until an approved adapter exists |
+| `GET /api/v1/artifacts`, `GET /api/v1/deployments` | List authorized artifact and deployment records |
+| `GET /api/v1/events` | Stream authorized project events with SSE and `Last-Event-ID` resume |
 
-`control_plane.py` is deliberately I/O-free and can be imported by both the current helper and a future hosted gateway. It owns:
+Mutation requests require an allowed `Origin`, the session’s `X-CSRF-Token`, and an `Idempotency-Key`. Project authorization comes from the server database. Provider resource identifiers returned by the API are opaque IDs. Error responses use `error_version`, `code`, `message`, `request_id`, and `recovery_action`.
 
-- current project policy;
-- allowed execution providers;
-- placement decisions;
-- safe resource resolution;
-- project/resource associations.
+`POST /api/v1/workspaces` creates a record that points to the static JupyterLite site; it does not create an isolated server kernel. Notebook files and kernels remain in browser storage. Closing this record does not stop a notebook tab that is already running. ARC start/stop, Slurm cancel/log access, persistent services, and cloud deployments are intentionally capability-gated until supported institutional adapters are approved and configured.
 
-Authentication, provider credentials, OOD/Slurm calls, deployment, and storage are adapters outside the control plane.
+The current OpenAPI file is [`hosted-gateway-openapi.yaml`](hosted-gateway-openapi.yaml).
 
-## Minimum hosted gateway contract
+## Authentication and authorization
 
-A hosted implementation should expose a small authenticated API with project/workspace vocabulary rather than Slurm vocabulary.
+The deployment places OAuth2 Proxy beside the gateway in the same pod. Only the proxy is exposed by the ClusterIP Service and ingress. It strips incoming authentication headers, performs OIDC, and forwards `X-Forwarded-User`, `X-Forwarded-Email`, and `X-Forwarded-Groups` to the gateway over loopback. The gateway trusts those headers only from configured proxy CIDRs. It stores an HMAC of the OIDC subject and does not persist the raw subject.
 
-Read operations:
+Before enabling the deployment, confirm that the chosen OIDC provider puts an immutable subject in `X-Forwarded-User`; configure the gateway’s `AUTH_USER_HEADER` to match the validated proxy behavior. The proxy claim names are set for Virginia Tech’s requested `mailPreferredAddress` and `targetedMembership` claims. Verify those claims and the comma-delimited group header against the actual OIDC client before onboarding users.
 
-- `GET /api/v1/session` — authenticated user/session state and non-secret capability flags;
-- `GET /api/v1/projects` — projects visible to the authenticated user;
-- `GET /api/v1/projects/{id}` — project and resource summaries;
-- `GET /api/v1/workspaces` — provider-neutral workspace state;
-- `GET /api/v1/providers` — enabled execution targets and capability metadata.
+Roles come only from rows in `course_group_mappings`, provisioned by an operator. Each authenticated request synchronizes its trusted group snapshot. A change to group membership or the operator’s group-to-project mapping refreshes project access on the next request. Direct memberships take precedence over course-group-derived memberships. A missing group claim revokes course-group-derived access rather than retaining stale access.
 
-Planning operations:
+The session uses a secure, HTTP-only OAuth cookie and a second secure CSRF cookie. Browser mutations also send the CSRF value returned by `/api/v1/session`. Never set `DEV_TRUST_IDENTITY_HEADERS=true` outside a private development process.
 
-- `POST /api/v1/placement` — return a provider decision without provisioning;
-- `POST /api/v1/workspaces/resolve` — resolve known provider resources to a project without mutation.
+## Local service setup
 
-Mutation operations must remain explicit and auditable:
+Use an approved PostgreSQL service and the gateway environment variables described in [`hosted_gateway/config.py`](../hosted_gateway/config.py). Run the schema migration as a single operator-controlled step before starting gateway replicas:
 
-- `POST /api/v1/workspaces` — create/start a reviewed workspace;
-- `POST /api/v1/workspaces/{id}/stop` — stop a selected workspace;
-- provider-specific deployment actions only after policy and human review.
+```powershell
+python -m pip install -r requirements-gateway.txt
+python -m hosted_gateway.migrate
+python -m hosted_gateway.admin docs/hosted-project.example.json
+python -m hosted_gateway.server
+```
 
-The public API should return opaque workspace/resource IDs. Raw cookies, passwords, API keys, SSH material, provider session tokens, and private endpoint credentials must never be returned to the static client.
+`DATABASE_URL`, `IDENTITY_HMAC_KEY`, and `CSRF_HMAC_KEY` are required. Keep the two HMAC keys stable across restarts; changing an identity key changes the derived account identity and requires a planned database migration. Store production values in the approved secret manager, not in the repository or static bundle.
 
-## Authentication
+The example project spec demonstrates only public labels and placeholder group names. Replace those names with groups returned by the approved OIDC claim before running the admin command. The admin CLI is a desired-state upsert for the project, its listed apps, and its course-group mappings. It does not create users or direct memberships, and it does not automatically delete old application manifests.
 
-The hosted gateway should use Virginia Tech-supported web authentication/OIDC when an institutional deployment path is validated. It must not:
+## Kubernetes rendering
 
-- collect VT passwords itself;
-- automate MFA;
-- copy OOD browser cookies into the static site;
-- rely on a long-lived shared instructor credential;
-- expose ARC SSH keys to browser JavaScript.
+The renderer produces JSON Kubernetes objects, which `kubectl` accepts directly:
 
-The authenticated VT identity should map server-side to project/course authorization.
+```powershell
+python deploy/kubernetes/render.py operator-values.json rendered
+kubectl apply -f rendered/
+```
 
-## ARC adapter
+`operator-values.json` must provide the namespace, ingress class, TLS issuer, static origin, JupyterLite URL, registered OIDC redirect, client ID, email domain, immutable gateway image digest, External Secrets `ClusterSecretStore` name, Vault path, ingress/monitoring namespaces, and explicit trusted-ingress, PostgreSQL, and OIDC egress CIDRs. The renderer rejects mutable image tags, unrestricted `/0` networks, and non-HTTPS origins.
 
-ARC remains the compute provider, not the identity provider for the web client. Before implementing a hosted ARC adapter, validate the supported integration path with ARC. Do not scrape undocumented OOD internals from a server service merely to avoid that conversation.
+The manifests apply a non-root gateway and OAuth sidecar, read-only filesystems, dropped Linux capabilities, a short-lived secure cookie, TLS ingress, a cert-manager `Certificate`, an External Secrets resource, a default-deny ingress/egress NetworkPolicy with explicit DNS and service CIDRs, two replicas, and a PodDisruptionBudget. The cluster must already provide the namespace, `ExternalSecret` CRD, named `ClusterSecretStore`, cert-manager issuer, ingress controller, DNS, image pull access, and approved egress routing. The Vault object must contain exactly the keys referenced by the renderer; its client secret must have no trailing newline and its cookie secret must be 16, 24, or 32 random bytes.
 
-Until a supported route exists, the existing visible OOD/local-helper path is the compatibility adapter.
+The example renderer does not invent an IT tenant, IDP issuer, Vault policy, ingress range, database range, image digest, DNS name, or certificate owner. Have the platform operator supply and review those values. Do not apply the sample until they reflect the actual tenant.
 
-## Deployment targets
+## Operations and data handling
 
-Preferred order for a hosted gateway:
+- Liveness is separate from readiness; readiness requires PostgreSQL.
+- Logs are structured and include request ID, method, route, status, duration, and opaque actor ID. They exclude request bodies and OIDC group/email claims.
+- `/metrics` exposes aggregate request counts; the rendered NetworkPolicy permits it only from the monitoring namespace on the gateway port.
+- `audit_events` are append-only. Workspace cleanup only ages local records; it never stops provider resources.
+- Idempotency records expire after 24 hours. Rate-limit windows are cleaned after two days.
+- SSE connections poll for authorized events, heartbeat when idle, and close after 30 minutes so clients reconnect with `Last-Event-ID`.
+- Back up PostgreSQL under institutional policy. Define production retention, deletion, recovery, alert thresholds, and on-call ownership with the platform operator before a pilot.
 
-1. Virginia Tech IT Common Platform, if CLAHS/central IT confirm an appropriate tenant/onboarding path.
-2. Institutionally managed cloud account (for example AWS) when the Common Platform does not fit the workload.
-3. Do not run the control gateway as an ad-hoc long-lived process on VT Domains; VT Domains is the static/LAMP presentation tier, not the research control plane.
+## Remaining institutional activation gates
 
-## Browser client behavior before the gateway exists
+These require a Virginia Tech or ARC administrator and cannot be completed from this repository:
 
-The VT Domains bundle may:
+1. Provision the Common Platform namespace, PostgreSQL, External Secrets/Vault store, ingress, TLS issuer, DNS, monitoring, and approved network ranges.
+2. Register the OIDC client and callback URL; confirm subject, email, group claim names and formats; authorize the exact static-site origin.
+3. Publish and scan the gateway image, record its registry digest, and pass the cluster’s image/signature policy.
+4. Provision project and group mappings using [`hosted-project.example.json`](hosted-project.example.json) adapted with real course groups.
+5. Obtain ARC’s supported delegated API path and an authorized acceptance account before enabling ARC mutations.
+6. Supply Developer ID credentials/notarization for signed macOS production releases, and complete an authorized ARC/browser pilot with support, retention, quota, and incident runbooks.
 
-- embed/open JupyterLite;
-- show public course/application metadata;
-- link to documented public services.
-
-It must keep ARC web-control features disabled until a real authenticated gateway URL is configured. This preserves a clean migration path without weakening the local helper.
+Until those gates pass, the hosted API can serve browser-side project metadata and JupyterLite records; ARC remains on the visible local helper/Open OnDemand path.

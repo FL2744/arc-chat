@@ -7,6 +7,7 @@ This directory is the browser-first Student Mode foundation for VT Domains-style
 - a static launcher requiring no local installation;
 - an embedded JupyterLite tab using the course deployment at `fl2744.github.io`;
 - a full-page JupyterLite escape hatch;
+- an optional Projects view that signs in through an approved hosted gateway and reads the caller’s project/workspace state;
 - no API keys, ARC credentials, cookies, or user research data stored in the static bundle.
 
 JupyterLite is the zero-infrastructure execution tier. It is appropriate for small browser-compatible Python/notebook work. ARC remains the research-compute tier for server-side packages, large data, GPUs, and longer jobs.
@@ -14,6 +15,8 @@ JupyterLite is the zero-infrastructure execution tier. It is appropriate for sma
 ## Why ARC is not directly wired from this page yet
 
 The existing ARC Chat helper is intentionally loopback-only. A hosted page must not receive permission to call that local control surface. The ARC card in `config.json` therefore remains disabled until an authenticated hosted gateway is validated.
+
+Gateway code exists, but there is no Virginia Tech deployment or ARC provider adapter yet. Leave `gateway_url` empty until the OIDC client, static origin, and browser cookie path are approved. When configured, the client sends credentialed requests only to that HTTPS origin; the bundle builder injects the same origin into its Content Security Policy.
 
 See `docs/HOSTED_GATEWAY.md`.
 
@@ -59,3 +62,5 @@ Do not put:
 - student data.
 
 The disabled ARC application can be enabled only after a hosted ARC gateway exists and has a public HTTPS entry point appropriate for students.
+
+The Projects view’s browser-workspace record points to the public JupyterLite site; it does not create an isolated server kernel. JupyterLite files and kernels remain browser-local. The deployed FL 2744 JupyterLite instance is maintained outside this repository, so this repository cannot pin its JupyterLite version, kernel packages, upload-size enforcement, or browser-storage quota. Those controls must be completed in the JupyterLite deployment before describing the student tier as production-ready.

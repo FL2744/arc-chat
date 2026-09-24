@@ -7,9 +7,12 @@ import re
 import secrets
 import shutil
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Mapping
+from urllib.parse import urlsplit
 
+from identifiers import new_id
 from jobs import JobSpec, SlurmBackend, NODE_RE
+from security import validate_public_metadata
 
 
 MODEL_PATH_RE = re.compile(r"^/common/data/models/[A-Za-z0-9_.+/-]{1,300}$")
@@ -60,8 +63,22 @@ class EndpointRegistry:
             raise ValueError("Invalid endpoint model id.")
         if not isinstance(endpoint, str) or not endpoint or len(endpoint) > 1000:
             raise ValueError("Invalid endpoint URL.")
-        identity = f"{provider}:{model}:{job_id or endpoint}"
-        record_id = "endpoint-" + __import__("hashlib").sha256(identity.encode("utf-8")).hexdigest()[:20]
+        parsed = urlsplit(endpoint)
+        loopback = parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("Endpoint URLs cannot contain credentials, query strings, or fragments.")
+        if reachability == "loopback_tunnel":
+            if parsed.scheme != "http" or not loopback:
+                raise ValueError("Loopback tunnel endpoints must use HTTP on a loopback address.")
+        elif parsed.scheme != "https":
+            raise ValueError("Non-loopback service endpoints must use HTTPS.")
+        if reachability == "arc_session" and not (parsed.hostname or "").lower().endswith(".arc.vt.edu"):
+            raise ValueError("ARC session endpoints must use an ARC HTTPS host.")
+        metadata = validate_public_metadata(metadata or {}, label="Endpoint metadata")
+        existing = next((item for item in self._items.values()
+                         if item.provider == provider and item.model == model
+                         and (item.job_id == str(job_id) if job_id else item.endpoint == endpoint)), None)
+        record_id = existing.id if existing else new_id("endpoint")
         record = EndpointRecord(
             id=record_id,
             provider=provider,
@@ -82,6 +99,46 @@ class EndpointRegistry:
         for key, item in list(self._items.items()):
             if item.job_id == str(job_id):
                 del self._items[key]
+
+    def export_records(self) -> list[dict[str, Any]]:
+        return [item.public_dict() for item in self.list()]
+
+    @classmethod
+    def from_records(cls, values: Any, *, limit: int = 200) -> "EndpointRegistry":
+        registry = cls()
+        if not isinstance(values, list):
+            return registry
+        for value in values[-max(1, min(1000, int(limit))):]:
+            if not isinstance(value, Mapping):
+                continue
+            try:
+                record_id = str(value.get("id") or "")
+                if not re.fullmatch(r"(?:ep_[0-9a-f]{32}|endpoint-[0-9a-f]{20})", record_id):
+                    continue
+                candidate = registry.upsert(
+                    provider=str(value.get("provider") or ""),
+                    model=str(value.get("model") or ""),
+                    endpoint=str(value.get("endpoint") or ""),
+                    reachability=str(value.get("reachability") or ""),
+                    state=str(value.get("state") or "available"),
+                    job_id=str(value.get("job_id") or ""),
+                    metadata=dict(value.get("metadata") or {}),
+                )
+                if candidate.id != record_id:
+                    registry._items.pop(candidate.id, None)
+                    registry._items[record_id] = EndpointRecord(
+                        id=record_id,
+                        provider=candidate.provider,
+                        model=candidate.model,
+                        endpoint=candidate.endpoint,
+                        reachability=candidate.reachability,
+                        state=candidate.state,
+                        job_id=candidate.job_id,
+                        metadata=candidate.metadata,
+                    )
+            except (TypeError, ValueError):
+                continue
+        return registry
 
 
 @dataclass(frozen=True)
