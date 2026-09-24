@@ -9,6 +9,7 @@ from config import CourseProfile
 from projects import ProjectManifest, ProjectRecord, ProjectRegistry
 from providers import PlacementDecision, PlacementEngine, PlacementRequest, ProviderRegistry, default_provider_registry
 from resolver import ResolutionDecision, ResourceCandidate, ResourceResolver
+from workspaces import WorkspaceRecord, WorkspaceRegistry
 
 
 class ControlPlane:
@@ -25,12 +26,14 @@ class ControlPlane:
         projects: ProjectRegistry,
         providers: ProviderRegistry,
         applications: ApplicationRegistry | None = None,
+        workspaces: WorkspaceRegistry | None = None,
         placement: PlacementEngine | None = None,
         resolver: ResourceResolver | None = None,
     ):
         self.projects = projects
         self.providers = providers
         self.applications = applications or ApplicationRegistry()
+        self.workspaces = workspaces or WorkspaceRegistry()
         self.placement = placement or PlacementEngine(providers)
         self.resolver = resolver or ResourceResolver()
 
@@ -40,6 +43,7 @@ class ControlPlane:
         profile: CourseProfile,
         *,
         projects: ProjectRegistry | None = None,
+        workspaces: WorkspaceRegistry | None = None,
     ) -> "ControlPlane":
         registry = projects or ProjectRegistry()
         project_id = profile.project_id or profile.id
@@ -54,7 +58,12 @@ class ControlPlane:
         registry.set_current(project.manifest.id)
         providers = default_provider_registry(jupyterlite_url=profile.jupyterlite_url)
         applications = load_applications()
-        return cls(projects=registry, providers=providers, applications=applications)
+        return cls(
+            projects=registry,
+            providers=providers,
+            applications=applications,
+            workspaces=workspaces or WorkspaceRegistry(),
+        )
 
     def current_project(self) -> ProjectRecord | None:
         return self.projects.current()
@@ -63,6 +72,37 @@ class ControlPlane:
         project = self.current_project()
         allowed = project.manifest.allowed_providers if project else ()
         return self.placement.decide(request, allowed_providers=allowed)
+
+    def ensure_workspace(
+        self,
+        *,
+        workspace_id: str,
+        provider_id: str,
+        kind: str = "interactive",
+        state: str = "new",
+        display_name: str = "",
+        metadata: dict[str, Any] | None = None,
+        make_current: bool = True,
+    ) -> WorkspaceRecord:
+        project = self.current_project()
+        if not project:
+            raise ValueError("Select a project before creating a workspace record.")
+        if provider_id not in project.manifest.allowed_providers:
+            raise ValueError("Workspace provider is not allowed for the current project.")
+        self.providers.get(provider_id)
+        record = self.workspaces.ensure(
+            workspace_id=workspace_id,
+            project_id=project.manifest.id,
+            provider_id=provider_id,
+            kind=kind,
+            state=state,
+            display_name=display_name,
+            metadata=metadata,
+        )
+        project.link("workspace", record.id, active=make_current)
+        if make_current:
+            self.workspaces.set_current(record.id)
+        return record
 
     def plan_application(self, application: str | ApplicationManifest) -> DeploymentPlan:
         manifest = self.applications.get(application) if isinstance(application, str) else application
@@ -92,6 +132,8 @@ class ControlPlane:
         project = self.current_project()
         return {
             "project": project.public_dict() if project else None,
+            "workspace": self.workspaces.current().public_dict() if self.workspaces.current() else None,
+            "workspaces": [item.public_dict() for item in self.workspaces.list(project_id=project.manifest.id if project else "")],
             "providers": self.providers.public_dicts(),
             "applications": self.applications.public_dicts(project_id=project.manifest.id if project else ""),
         }
