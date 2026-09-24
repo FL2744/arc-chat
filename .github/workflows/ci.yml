@@ -38,7 +38,7 @@ jobs:
         run: python -m unittest discover -s . -p 'test_*.py' -v
 
   package-check:
-    name: Packaging source check
+    name: Gateway image, security, and packaging checks
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -58,7 +58,34 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build standalone hosted gateway image
-        run: docker build --file Dockerfile.gateway --tag arc-chat-gateway:ci .
+        run: docker buildx build --load --file Dockerfile.gateway --tag arc-chat-gateway:ci .
+      - name: Generate gateway image SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          image: arc-chat-gateway:ci
+          format: spdx-json
+          output-file: arc-chat-gateway.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Scan gateway image for high and critical vulnerabilities
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        id: gateway-scan
+        with:
+          image: arc-chat-gateway:ci
+          output-format: json
+          output-file: arc-chat-gateway-grype.json
+          severity-cutoff: high
+          fail-build: true
+      - name: Upload gateway SBOM and vulnerability report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-sbom-and-scan
+          path: |
+            arc-chat-gateway.spdx.json
+            arc-chat-gateway-grype.json
+          if-no-files-found: warn
+          retention-days: 30
       - name: Install OpenAPI validator
         run: python -m pip install openapi-spec-validator==0.9.0
       - name: Validate hosted gateway OpenAPI contract

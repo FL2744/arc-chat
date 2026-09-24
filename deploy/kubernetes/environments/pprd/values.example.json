@@ -1,0 +1,38 @@
+{
+  "environment": "pprd",
+  "tenant_id": "",
+  "namespace": "",
+  "gateway_host": "",
+  "static_origin": "",
+  "notebook_url": "https://fl2744.github.io/jupyterlite/lab/index.html",
+  "gateway_image": "",
+  "oidc_issuer_url": "",
+  "oidc_redirect_url": "",
+  "oidc_client_id": "",
+  "email_domain": "",
+  "ingress_class": "",
+  "cluster_issuer": "",
+  "tls_secret_name": "",
+  "external_secret_store": "",
+  "vault_secret_path": "",
+  "ingress_namespace": "",
+  "monitoring_namespace": "",
+  "trusted_ingress_cidrs": [],
+  "database_egress_cidrs": [],
+  "oidc_egress_cidrs": [],
+  "replicas": null,
+  "resources": {
+    "gateway": {
+      "requests": {"cpu": "", "memory": ""},
+      "limits": {"cpu": "", "memory": ""}
+    },
+    "oauth2_proxy": {
+      "requests": {"cpu": "", "memory": ""},
+      "limits": {"cpu": "", "memory": ""}
+    }
+  },
+  "storage": {
+    "database": "external-postgresql",
+    "gateway_persistent_volume": false
+  }
+}

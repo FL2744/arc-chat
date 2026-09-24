@@ -19,13 +19,15 @@ This architectural release establishes the project/workspace control plane and a
 - Added an operator CLI for provisioning project/application manifests and course-group mappings.
 - Added a static Projects view with optional gateway sign-in, project selection, browser-workspace records, and non-mutating ARC placement review.
 - Added a fail-closed Kubernetes renderer with non-root/read-only containers, an OIDC proxy sidecar, External Secrets, TLS ingress, explicit network policy CIDRs, replicas, and disruption budget.
+- Added a CI-generated SPDX SBOM and Grype image scan; CI blocks gateway images with high or critical known vulnerabilities and retains the reports as workflow artifacts.
 - Kept ARC and Common Platform mutations disabled until their institutionally supported provider adapters and credentials are available.
 
 ## Verification
 
-- Full local unit suite: **145 tests passed**.
+- Full local unit suite after the environment-renderer changes: **149 tests passed; 2 PostgreSQL-only tests skipped without a local database**.
 - Python compile gate: passed for gateway, control-plane, and distribution modules.
-- Local tests do not replace the 13-job GitHub Actions matrix, a live PostgreSQL migration test, OIDC claim verification, a Common Platform deployment, or an authorized ARC acceptance pass.
+- The GitHub Actions matrix passed on the v0.5 foundation commit, including the fresh PostgreSQL integration service, Docker image build, OpenAPI validation, and portable package smoke checks. The follow-up SBOM/vulnerability gate is being added in this change and must pass before release.
+- CI does not replace OIDC claim verification, a Common Platform deployment, or an authorized ARC acceptance pass.
 
 ## Activation work still required
 
@@ -35,4 +37,6 @@ This architectural release establishes the project/workspace control plane and a
 - Deploy the static client and configure matching gateway CORS/CSP origins.
 - Obtain ARC’s approved user-delegated API for job/session discovery and mutations. Until then ARC remains on the secure local helper/Open OnDemand path.
 - Pin and configure the separately maintained JupyterLite deployment; validate the requested 100 MB file policy and browser-storage quota there.
+- Complete the environment-specific Common Platform values and ownership decisions in [`COMMON_PLATFORM_ONBOARDING.md`](COMMON_PLATFORM_ONBOARDING.md); no institutional values are checked in.
+- Confirm ARC's supported delegated operations against [`ARC_INTEGRATION_SPEC.md`](ARC_INTEGRATION_SPEC.md).
 - Define production retention, backup, SLO, quota, support, incident, and staged-pilot runbooks. Sign/notarize macOS releases with institutional credentials before production distribution.

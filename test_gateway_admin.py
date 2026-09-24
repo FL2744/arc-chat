@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import unittest
 
 from hosted_gateway.admin import validate_project_spec
@@ -30,6 +32,15 @@ class GatewayAdminSpecTests(unittest.TestCase):
             validate_project_spec({**base, "allowed_providers": ["shell"]})
         with self.assertRaisesRegex(ValueError, "credential-like"):
             validate_project_spec({**base, "metadata": {"client_secret": "must-not-persist"}})
+
+    def test_environment_project_templates_cannot_be_applied_before_classification(self):
+        root = Path(__file__).parent / "deploy" / "kubernetes" / "environments"
+        for environment in ("dvlp", "pprd", "prod"):
+            with self.subTest(environment=environment):
+                spec = json.loads((root / environment / "project-mapping.example.json").read_text(encoding="utf-8"))
+                self.assertEqual(spec["course_groups"], [])
+                with self.assertRaisesRegex(ValueError, "data classification"):
+                    validate_project_spec(spec)
 
 
 if __name__ == "__main__":

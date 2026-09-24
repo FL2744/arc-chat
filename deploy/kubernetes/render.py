@@ -11,6 +11,7 @@ import argparse
 import ipaddress
 import json
 import re
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -23,6 +24,8 @@ OAUTH2_PROXY_IMAGE = (
 _DNS_LABEL = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$")
 _IMAGE = re.compile(r"^[a-z0-9./_-]+@sha256:[0-9a-f]{64}$")
 _SECRET_PATH = re.compile(r"^[A-Za-z0-9._/-]{1,240}$")
+_CPU_QUANTITY = re.compile(r"^(?:[0-9]+(?:\.[0-9]+)?|[0-9]+m)$")
+_MEMORY_QUANTITY = re.compile(r"^([1-9][0-9]*)(Ki|Mi|Gi|Ti)?$")
 
 
 def _origin(value: Any, label: str) -> tuple[str, str]:
@@ -74,20 +77,84 @@ def _cidrs(values: Any, label: str) -> list[str]:
     return sorted(set(parsed))
 
 
+def _resource_quantity(value: Any, label: str, *, cpu: bool) -> tuple[str, Decimal]:
+    quantity = str(value or "").strip()
+    if cpu:
+        if not _CPU_QUANTITY.fullmatch(quantity):
+            raise ValueError(f"{label} must be an explicit CPU quantity such as 100m or 1.")
+        try:
+            amount = Decimal(quantity[:-1]) / Decimal(1000) if quantity.endswith("m") else Decimal(quantity)
+        except InvalidOperation as exc:
+            raise ValueError(f"{label} is invalid.") from exc
+    else:
+        match = _MEMORY_QUANTITY.fullmatch(quantity)
+        if not match:
+            raise ValueError(f"{label} must be an explicit memory quantity using bytes, Ki, Mi, Gi, or Ti.")
+        scale = {None: 1, "Ki": 1024, "Mi": 1024**2, "Gi": 1024**3, "Ti": 1024**4}[match.group(2)]
+        amount = Decimal(match.group(1)) * scale
+    if amount <= 0:
+        raise ValueError(f"{label} must be greater than zero.")
+    return quantity, amount
+
+
+def _container_resources(config: Any, name: str) -> dict[str, dict[str, str]]:
+    if not isinstance(config, dict) or set(config) != {"requests", "limits"}:
+        raise ValueError(f"resources.{name} must define requests and limits.")
+    normalized: dict[str, dict[str, str]] = {}
+    numeric: dict[str, dict[str, Decimal]] = {}
+    for section in ("requests", "limits"):
+        raw = config[section]
+        if not isinstance(raw, dict) or set(raw) != {"cpu", "memory"}:
+            raise ValueError(f"resources.{name}.{section} must explicitly define cpu and memory.")
+        normalized[section] = {}
+        numeric[section] = {}
+        for resource, is_cpu in (("cpu", True), ("memory", False)):
+            text, amount = _resource_quantity(raw[resource], f"resources.{name}.{section}.{resource}", cpu=is_cpu)
+            normalized[section][resource] = text
+            numeric[section][resource] = amount
+    for resource in ("cpu", "memory"):
+        if numeric["requests"][resource] > numeric["limits"][resource]:
+            raise ValueError(f"resources.{name} request for {resource} cannot exceed its limit.")
+    return normalized
+
+
 def validate_config(config: Any) -> dict[str, Any]:
     if not isinstance(config, dict):
         raise ValueError("Deployment configuration must be a JSON object.")
     required = {
-        "namespace", "gateway_host", "static_origin", "notebook_url", "gateway_image",
+        "environment", "tenant_id", "namespace", "gateway_host", "static_origin", "notebook_url", "gateway_image",
         "oidc_issuer_url", "oidc_redirect_url", "oidc_client_id", "email_domain",
-        "ingress_class", "cluster_issuer", "external_secret_store", "vault_secret_path",
+        "ingress_class", "cluster_issuer", "tls_secret_name", "external_secret_store", "vault_secret_path",
         "ingress_namespace", "monitoring_namespace", "trusted_ingress_cidrs",
-        "database_egress_cidrs", "oidc_egress_cidrs",
+        "database_egress_cidrs", "oidc_egress_cidrs", "replicas", "resources", "storage",
     }
     missing = sorted(required - set(config))
     if missing:
         raise ValueError("Missing deployment settings: " + ", ".join(missing))
     value = dict(config)
+    value["environment"] = str(value["environment"]).strip().lower()
+    if value["environment"] not in {"dvlp", "pprd", "prod"}:
+        raise ValueError("environment must be one of dvlp, pprd, or prod.")
+    tenant_id = str(value["tenant_id"]).strip().lower()
+    if len(tenant_id) > 63 or not _DNS_LABEL.fullmatch(tenant_id):
+        raise ValueError("tenant_id must be a Kubernetes label-compatible DNS label.")
+    value["tenant_id"] = tenant_id
+    replicas = value["replicas"]
+    if not isinstance(replicas, int) or isinstance(replicas, bool) or not 1 <= replicas <= 10:
+        raise ValueError("replicas must be an explicitly configured integer from 1 through 10.")
+    if value["environment"] in {"pprd", "prod"} and replicas < 2:
+        raise ValueError("pprd and prod require at least two replicas.")
+    value["resources"] = {
+        "gateway": _container_resources(value["resources"].get("gateway") if isinstance(value["resources"], dict) else None, "gateway"),
+        "oauth2_proxy": _container_resources(value["resources"].get("oauth2_proxy") if isinstance(value["resources"], dict) else None, "oauth2_proxy"),
+    }
+    if set(config["resources"]) != {"gateway", "oauth2_proxy"}:
+        raise ValueError("resources must define exactly gateway and oauth2_proxy containers.")
+    storage = value["storage"]
+    if (not isinstance(storage, dict) or set(storage) != {"database", "gateway_persistent_volume"}
+            or storage.get("database") != "external-postgresql"
+            or storage.get("gateway_persistent_volume") is not False):
+        raise ValueError("storage must use external-postgresql and disable gateway persistent volumes.")
     for field in ("namespace", "ingress_namespace", "monitoring_namespace"):
         value[field] = _dns(value[field], field)
     value["gateway_host"] = _dns(value["gateway_host"], "gateway_host")
@@ -105,7 +172,7 @@ def validate_config(config: Any) -> dict[str, Any]:
         raise ValueError("oidc_client_id is invalid.")
     email_domain = str(value["email_domain"]).strip().lower().lstrip("@").rstrip(".")
     value["email_domain"] = _dns(email_domain, "email_domain")
-    for field in ("ingress_class", "cluster_issuer", "external_secret_store"):
+    for field in ("ingress_class", "cluster_issuer", "tls_secret_name", "external_secret_store"):
         value[field] = _dns(value[field], field)
     if not _SECRET_PATH.fullmatch(str(value["vault_secret_path"])):
         raise ValueError("vault_secret_path must be an explicit non-secret path.")
@@ -122,7 +189,12 @@ def _metadata(name: str, namespace: str, labels: dict[str, str] | None = None) -
 def render_resources(config: Any) -> list[dict[str, Any]]:
     value = validate_config(config)
     namespace = value["namespace"]
-    labels = {"app.kubernetes.io/name": "arc-chat-gateway", "app.kubernetes.io/part-of": "arc-chat"}
+    labels = {
+        "app.kubernetes.io/name": "arc-chat-gateway",
+        "app.kubernetes.io/part-of": "arc-chat",
+        "arc-chat.vt.edu/environment": value["environment"],
+        "arc-chat.vt.edu/tenant": value["tenant_id"],
+    }
     selectors = {"app.kubernetes.io/name": "arc-chat-gateway"}
     trusted_proxy_cidrs = ",".join(value["trusted_ingress_cidrs"])
     resources: list[dict[str, Any]] = []
@@ -135,6 +207,7 @@ def render_resources(config: Any) -> list[dict[str, Any]]:
         "apiVersion": "v1", "kind": "ConfigMap", "metadata": _metadata("arc-chat-gateway", namespace, labels),
         "data": {
             "APP_ENV": "production", "HOST": "0.0.0.0", "PORT": "8080",
+            "DEPLOYMENT_ENVIRONMENT": value["environment"], "TENANT_ID": value["tenant_id"],
             "STATIC_ALLOWED_ORIGINS": value["static_origin"], "JUPYTERLITE_URL": value["notebook_url"],
             "TRUSTED_AUTH_PROXY_CIDRS": "127.0.0.1/32,::1/128",
             "AUTH_USER_HEADER": "X-Forwarded-User", "AUTH_EMAIL_HEADER": "X-Forwarded-Email",
@@ -185,7 +258,7 @@ def render_resources(config: Any) -> list[dict[str, Any]]:
     resources.append({
         "apiVersion": "apps/v1", "kind": "Deployment", "metadata": _metadata("arc-chat-gateway", namespace, labels),
         "spec": {
-            "replicas": 2, "revisionHistoryLimit": 3,
+            "replicas": value["replicas"], "revisionHistoryLimit": 3,
             "selector": {"matchLabels": selectors},
             "strategy": {"type": "RollingUpdate", "rollingUpdate": {"maxUnavailable": 0, "maxSurge": 1}},
             "template": {
@@ -207,7 +280,7 @@ def render_resources(config: Any) -> list[dict[str, Any]]:
                             "name": "gateway", "image": value["gateway_image"], "imagePullPolicy": "IfNotPresent",
                             "ports": [{"name": "http", "containerPort": 8080, "protocol": "TCP"}],
                             "env": gateway_env,
-                            "resources": {"requests": {"cpu": "100m", "memory": "192Mi"}, "limits": {"cpu": "1", "memory": "512Mi"}},
+                            "resources": value["resources"]["gateway"],
                             "securityContext": {"runAsUser": 10001, "runAsGroup": 10001, "allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}},
                             "startupProbe": {"exec": {"command": ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/live', timeout=2)"]}, "periodSeconds": 5, "failureThreshold": 24},
                             "livenessProbe": {"exec": {"command": ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/live', timeout=2)"]}, "periodSeconds": 20, "timeoutSeconds": 3, "failureThreshold": 3},
@@ -225,7 +298,7 @@ def render_resources(config: Any) -> list[dict[str, Any]]:
                                 {"name": "oauth-secrets", "mountPath": "/var/run/arc-chat-secrets", "readOnly": True},
                                 {"name": "oauth-tmp", "mountPath": "/tmp"},
                             ],
-                            "resources": {"requests": {"cpu": "50m", "memory": "64Mi"}, "limits": {"cpu": "500m", "memory": "256Mi"}},
+                            "resources": value["resources"]["oauth2_proxy"],
                             "securityContext": {"runAsUser": 2000, "runAsGroup": 2000, "runAsNonRoot": True, "allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}},
                             "startupProbe": {"httpGet": {"path": "/ping", "port": 4180}, "periodSeconds": 5, "failureThreshold": 24},
                             "livenessProbe": {"httpGet": {"path": "/ping", "port": 4180}, "periodSeconds": 20, "timeoutSeconds": 3, "failureThreshold": 3},
@@ -246,13 +319,13 @@ def render_resources(config: Any) -> list[dict[str, Any]]:
         },
         "spec": {
             "ingressClassName": value["ingress_class"],
-            "tls": [{"hosts": [value["gateway_host"]], "secretName": "arc-chat-gateway-tls"}],
+            "tls": [{"hosts": [value["gateway_host"]], "secretName": value["tls_secret_name"]}],
             "rules": [{"host": value["gateway_host"], "http": {"paths": [{"path": "/", "pathType": "Prefix", "backend": {"service": {"name": "arc-chat-gateway", "port": {"number": 80}}}}]}}],
         },
     })
     resources.append({
-        "apiVersion": "cert-manager.io/v1", "kind": "Certificate", "metadata": _metadata("arc-chat-gateway-tls", namespace, labels),
-        "spec": {"secretName": "arc-chat-gateway-tls", "issuerRef": {"name": value["cluster_issuer"], "kind": "ClusterIssuer"}, "dnsNames": [value["gateway_host"]]},
+        "apiVersion": "cert-manager.io/v1", "kind": "Certificate", "metadata": _metadata(value["tls_secret_name"], namespace, labels),
+        "spec": {"secretName": value["tls_secret_name"], "issuerRef": {"name": value["cluster_issuer"], "kind": "ClusterIssuer"}, "dnsNames": [value["gateway_host"]]},
     })
     resources.append({
         "apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": _metadata("arc-chat-gateway", namespace, labels),
