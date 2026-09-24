@@ -76,9 +76,27 @@ class LoopbackIntegrationApiTests(unittest.IsolatedAsyncioTestCase):
         provider_ids = {item["id"] for item in (await providers.json())["items"]}
         self.assertTrue({"browser", "arc"} <= provider_ids)
 
-        for path in ("/api/v1/projects", "/api/v1/providers", "/api/v1/applications"):
+        for path in ("/api/v1/projects", "/api/v1/workspaces", "/api/v1/providers", "/api/v1/applications"):
             response = await self.client.post(self.url(path), json={})
             self.assertEqual(response.status, 405)
+
+    async def test_workspaces_are_project_scoped_read_only_records(self):
+        record = self.bridge.remember_workspace(
+            "browser",
+            "https://fl2744.github.io/jupyterlite/lab/index.html",
+            kind="browser",
+            state="ready",
+            display_name="Browser / JupyterLite",
+        )
+        response = await self.client.get(self.url("/api/v1/workspaces"))
+        self.assertEqual(response.status, 200)
+        payload = await response.json()
+        self.assertEqual(payload["current_workspace_id"], record.id)
+        self.assertEqual(payload["items"][0]["provider_id"], "browser")
+        self.assertNotIn("fl2744.github.io", str(payload))
+        denied = await self.client.post(self.url("/api/v1/workspaces"), json={})
+        self.assertEqual(denied.status, 405)
+        self.bridge.dispatch.assert_not_awaited()
 
     async def test_read_only_application_and_placement_planning(self):
         self.bridge.control_plane.applications.register(ApplicationManifest(
