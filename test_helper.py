@@ -65,8 +65,12 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
         class Locator:
             def __init__(self,items): self.items=items
             def or_(self,other): return Locator(self.items+other.items)
+            def nth(self,index): return Locator([self.items[index]])
             async def count(self): return len(self.items)
             async def click(self): self.items[0]['clicked']=True
+            async def evaluate(self,_script):
+                item=self.items[0]
+                return {'text':item['label']+' | allocation course-alpha | ready','href':'https://ood.arc.vt.edu/pun/sys/dashboard/batch_connect/sessions/connect/'+str(id(item))}
         class Page:
             url='https://ood.arc.vt.edu/pun/sys/dashboard/batch_connect/sessions'
             def __init__(self,labels): self.items=[dict(label=x,clicked=False) for x in labels]
@@ -79,15 +83,50 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
             await b.browser_click('connect')
             self.assertEqual([i['label'] for i in page.items if i['clicked']],[expected])
         for labels in [[notebook,lab,notebook,lab]]:
-            b=Bridge(); b.capture_jupyter=AsyncMock(); page=Page(labels); b.context=SimpleNamespace(pages=[page])
-            with self.assertRaises(ValueError): await b.browser_click('connect')
+            b=Bridge(); b.capture_jupyter=AsyncMock(); b.emit=AsyncMock(); page=Page(labels); b.context=SimpleNamespace(pages=[page])
+            result=await b.browser_click('connect')
+            self.assertIn('choose',result.lower())
             self.assertFalse(any(i['clicked'] for i in page.items))
+            self.assertEqual(len(b.connect_choices),2)
+            choice_event=next(call for call in b.emit.call_args_list if call.args and call.args[0]=='workspace_choices')
+            self.assertEqual(len(choice_event.kwargs['items']),2)
+            self.assertTrue(all('course-alpha' in item['detail'] for item in choice_event.kwargs['items']))
 
         b=Bridge(); b.capture_jupyter=AsyncMock(); page=Page([]); b.context=SimpleNamespace(pages=[page]); b.emit=AsyncMock()
         result=await b.browser_click('connect')
         self.assertIn('still starting',result)
         self.assertFalse(any(i['clicked'] for i in page.items))
         self.assertEqual(b.emit.call_args.kwargs['stage'],'waiting')
+
+    async def test_browser_workspace_uses_profile_jupyterlite_without_arc(self):
+        b=Bridge()
+        b.emit=AsyncMock()
+        b.profile=get_profile('fl2744')
+        import helper
+        original=helper.webbrowser.open
+        opened=[]
+        helper.webbrowser.open=lambda url: opened.append(url) or True
+        try:
+            result=await b.dispatch('browser_workspace',{})
+        finally:
+            helper.webbrowser.open=original
+        self.assertIn('No ARC job',result)
+        self.assertEqual(opened,[b.profile.jupyterlite_url])
+        event=b.emit.call_args
+        self.assertEqual(event.args[0],'placement')
+        self.assertEqual(event.kwargs['item']['provider_id'],'browser')
+        self.assertFalse(event.kwargs['item']['requires_review'])
+
+    async def test_placement_preview_separates_browser_and_arc_workloads(self):
+        b=Bridge(); b.emit=AsyncMock()
+        await b.dispatch('placement_preview',{'mode':'interactive','estimated_input_mb':2})
+        browser=b.emit.call_args.kwargs['item']
+        self.assertEqual(browser['provider_id'],'browser')
+        self.assertEqual(browser['provider']['launch_url'],b.profile.jupyterlite_url)
+        await b.dispatch('placement_preview',{'mode':'interactive','needs_gpu':True})
+        arc=b.emit.call_args.kwargs['item']
+        self.assertEqual(arc['provider_id'],'arc')
+        self.assertFalse(arc['requires_review'])
 
     async def test_student_workspace_without_preconfigured_allocation_uses_visible_form(self):
         b=Bridge()
@@ -152,6 +191,21 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
         b.jupyter_page=None
         with self.assertRaisesRegex(ValueError,'Choose'): await b.discover_jupyter()
         self.assertEqual(len(b.emit.call_args.kwargs['items']),2)
+
+    async def test_connect_choice_uses_selected_locator_then_attaches(self):
+        b=Bridge()
+        selected=SimpleNamespace(click=AsyncMock())
+        b.connect_choices={'choice-abc':selected}
+        b.context=SimpleNamespace(pages=[SimpleNamespace(url='https://ood.arc.vt.edu/pun/sys/dashboard')])
+        b.capture_jupyter=AsyncMock()
+        b.discover_jupyter=AsyncMock(return_value='https://ood.arc.vt.edu/node/a/123/tree')
+        b.workspace=SimpleNamespace(start=AsyncMock(return_value='Connected selected workspace'))
+        result=await b.connect_choice('choice-abc','python3')
+        selected.click.assert_awaited_once()
+        b.capture_jupyter.assert_awaited_once()
+        b.workspace.start.assert_awaited_once_with('https://ood.arc.vt.edu/node/a/123/tree','python3')
+        self.assertEqual(result,'Connected selected workspace')
+        self.assertEqual(b.connect_choices,{})
 
     async def test_captures_new_popup_and_same_tab_navigation(self):
         old=SimpleNamespace(url='https://ood.arc.vt.edu/pun/sys/dashboard')

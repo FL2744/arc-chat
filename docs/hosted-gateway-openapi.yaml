@@ -1,0 +1,302 @@
+openapi: 3.1.0
+info:
+  title: ARC Chat Hosted Gateway
+  version: 0.1.0
+  description: >
+    Provider-neutral contract for a future Virginia Tech-hosted ARC Chat gateway.
+    This document is an architecture target, not a claim that the hosted service
+    is deployed or institutionally supported.
+servers:
+  - url: https://example.invalid
+    description: Placeholder only; replace after an approved hosted deployment exists.
+paths:
+  /api/v1/session:
+    get:
+      summary: Read authenticated session and capability state
+      responses:
+        "200":
+          description: Session state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionSnapshot"
+  /api/v1/projects:
+    get:
+      summary: List projects visible to the authenticated user
+      responses:
+        "200":
+          description: Project list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Project"
+  /api/v1/providers:
+    get:
+      summary: List enabled and planned execution providers
+      responses:
+        "200":
+          description: Provider list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Provider"
+  /api/v1/placement:
+    post:
+      summary: Plan a workload without provisioning resources
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlacementRequest"
+      responses:
+        "200":
+          description: Placement decision only; no resource mutation occurred
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlacementDecision"
+  /api/v1/workspaces/resolve:
+    post:
+      summary: Resolve known provider resources to the selected project without mutation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id, candidates]
+              properties:
+                project_id:
+                  type: string
+                candidates:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/ResourceCandidate"
+      responses:
+        "200":
+          description: Resolution decision only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolutionDecision"
+  /api/v1/workspaces:
+    get:
+      summary: List provider-neutral workspaces
+      responses:
+        "200":
+          description: Workspace summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Workspace"
+    post:
+      summary: Start a reviewed workspace
+      description: >
+        Optional mutation capability for a future approved gateway. Implementations
+        must enforce authenticated project authorization and human-reviewed resource
+        policy before provisioning.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id, provider_id]
+              properties:
+                project_id:
+                  type: string
+                provider_id:
+                  type: string
+                reviewed_request_id:
+                  type: string
+      responses:
+        "202":
+          description: Workspace start accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+  /api/v1/workspaces/{workspace_id}/stop:
+    post:
+      summary: Stop an explicitly selected workspace
+      parameters:
+        - in: path
+          name: workspace_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Stop request accepted
+components:
+  schemas:
+    SessionSnapshot:
+      type: object
+      required: [authenticated, capabilities]
+      properties:
+        authenticated:
+          type: boolean
+        user:
+          type: object
+          additionalProperties: false
+          properties:
+            display_name:
+              type: string
+        current_project_id:
+          type: string
+        capabilities:
+          type: object
+          additionalProperties:
+            type: boolean
+    Project:
+      type: object
+      required: [id, name, allowed_providers]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+        audience:
+          type: string
+        allowed_providers:
+          type: array
+          items:
+            type: string
+    Provider:
+      type: object
+      required: [id, label, modes, status]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        modes:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+        supports_gpu:
+          type: boolean
+        supports_server_packages:
+          type: boolean
+        supports_persistent_service:
+          type: boolean
+        launch_url:
+          type: string
+          format: uri
+    PlacementRequest:
+      type: object
+      properties:
+        project_id:
+          type: string
+        mode:
+          type: string
+          enum: [browser, interactive, batch, service]
+        preferred_provider:
+          type: string
+          default: auto
+        needs_gpu:
+          type: boolean
+        requires_server_packages:
+          type: boolean
+        persistent_service:
+          type: boolean
+        estimated_input_mb:
+          type: integer
+          minimum: 0
+    PlacementDecision:
+      type: object
+      required: [provider_id, action, reason, confidence, requires_review]
+      properties:
+        provider_id:
+          type: string
+        action:
+          type: string
+          enum: [use, review]
+        reason:
+          type: string
+        confidence:
+          type: string
+        requires_review:
+          type: boolean
+        provider:
+          $ref: "#/components/schemas/Provider"
+    ResourceCandidate:
+      type: object
+      required: [resource_id, state]
+      properties:
+        resource_id:
+          type: string
+        provider:
+          type: string
+        kind:
+          type: string
+        project_id:
+          type: string
+        state:
+          type: string
+        name:
+          type: string
+        node:
+          type: string
+        reason:
+          type: string
+    ResolutionDecision:
+      type: object
+      required: [action, resource_id, confidence, reason, candidates]
+      properties:
+        action:
+          type: string
+          enum: [reuse, wait, choose, start]
+        resource_id:
+          type: string
+        confidence:
+          type: string
+        reason:
+          type: string
+        candidates:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResourceCandidate"
+    Workspace:
+      type: object
+      required: [id, project_id, provider_id, state]
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        provider_id:
+          type: string
+        state:
+          type: string
+        display_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time

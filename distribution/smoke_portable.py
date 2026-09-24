@@ -70,7 +70,10 @@ def smoke(package: Path) -> None:
                     raise RuntimeError(f"Packaged ARC Chat exited early with code {process.returncode}")
                 try:
                     with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1) as response:
-                        body = response.read(65536)
+                        # arc-chat.html is intentionally self-contained and can
+                        # exceed 64 KiB. Read a bounded but comfortably larger
+                        # prefix so UI-marker checks do not fail as CSS/UX grows.
+                        body = response.read(512 * 1024)
                     break
                 except OSError:
                     time.sleep(0.2)

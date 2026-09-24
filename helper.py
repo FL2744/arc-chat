@@ -6,6 +6,7 @@ from urllib.parse import urlsplit, urlunsplit, quote
 from aiohttp import web, ClientSession, ClientTimeout, WSMsgType, TCPConnector
 from playwright.async_api import async_playwright, TimeoutError as BrowserTimeout, Error as BrowserError
 from config import get_profile
+from control_plane import ControlPlane
 from artifacts import ArtifactStore
 from context_window import bounded_history, truncate_text
 from diagnostics import Doctor
@@ -15,6 +16,9 @@ from jobs import JobHistory, JobSpec, RESOURCE_PROFILES, SlurmBackend, SshComman
 from model_providers import ARC_ENDPOINT, ModelCatalog, build_provider
 from ood import OODBrowserAdapter
 from protocol import CommandEnvelope, PROTOCOL_VERSION, ReplayCache
+from projects import ProjectRegistry, stable_resource_id
+from providers import PlacementRequest
+from resolver import ResourceResolver
 from security import redact_text
 from services import EndpointRegistry, SshTunnel, VllmServiceManager, VllmServiceSpec
 from state import AppState, AppStateMachine, InvalidTransition
@@ -128,6 +132,7 @@ class Bridge:
         self.endpoint_registry = EndpointRegistry()
         self.vllm_service = None
         self.vllm_tunnel = None
+        self.connect_choices = {}
         self.last_job_id = ''
         self.build = BUILD
         self.version = VERSION
@@ -143,12 +148,31 @@ class Bridge:
             self.profile_error = str(exc)
         self.ood = OODBrowserAdapter(self)
         self.workspace = JupyterWorkspace(self)
+        self.project_registry = ProjectRegistry()
         self.recovery_path = self._recovery_path() if enable_recovery else None
         self.recovery_metadata = self._load_recovery_state() if enable_recovery else {}
         if self.recovery_metadata:
             self.artifacts = ArtifactStore.from_records(self.recovery_metadata.get('artifacts'))
             self.job_history = JobHistory.from_records(self.recovery_metadata.get('jobs'))
             self.last_job_id = str(self.recovery_metadata.get('job_id') or '')
+            self.project_registry = ProjectRegistry.from_records(
+                self.recovery_metadata.get('projects'),
+                current_project_id=str(self.recovery_metadata.get('current_project_id') or ''),
+            )
+        self.control_plane = ControlPlane.for_profile(self.profile, projects=self.project_registry)
+        # Compatibility aliases keep the existing helper/UI seams stable while
+        # the provider-neutral control plane becomes reusable by a hosted gateway.
+        self.project_registry = self.control_plane.projects
+        self.provider_registry = self.control_plane.providers
+        self.placement_engine = self.control_plane.placement
+        self.resource_resolver = self.control_plane.resolver
+        project = self.control_plane.current_project()
+        if (
+            self.last_job_id
+            and self.recovery_metadata.get('profile') == self.profile.id
+            and any(item.job_id == self.last_job_id for item in self.job_history.list())
+        ):
+            project.link('job', self.last_job_id, active=True)
 
     @staticmethod
     def _recovery_path():
@@ -171,17 +195,25 @@ class Bridge:
             return {}
         try:
             value = json.loads(self.recovery_path.read_text(encoding='utf-8'))
-            if not isinstance(value, dict) or value.get('version') not in {1, 2}:
+            if not isinstance(value, dict) or value.get('version') not in {1, 2, 3}:
                 return {}
-            return {k:value.get(k) for k in ('version','build','app_version','profile','workspace_base','notebook_path','session_id','job_id','jobs','artifacts','saved_at')}
+            return {k:value.get(k) for k in (
+                'version','build','app_version','profile','workspace_base','notebook_path','session_id',
+                'job_id','jobs','artifacts','projects','current_project_id','saved_at'
+            )}
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return {}
 
     def persist_recovery_state(self):
         if self.recovery_path is None:
             return
+        project = self.project_registry.current()
+        if project and self.base:
+            project.link('workspace', stable_resource_id('workspace', self.base), active=True)
+        if project and self.last_job_id:
+            project.link('job', self.last_job_id, active=True)
         payload = {
-            'version': 2,
+            'version': 3,
             'build': self.build,
             'app_version': self.version,
             'profile': self.profile.id,
@@ -191,6 +223,8 @@ class Bridge:
             'job_id': self.last_job_id,
             'jobs': self.job_history.export_records(),
             'artifacts': self.artifacts.export_records(),
+            'projects': self.project_registry.export_records(),
+            'current_project_id': self.project_registry.current_project_id,
             'saved_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
         self.recovery_path.parent.mkdir(parents=True, exist_ok=True)
@@ -352,12 +386,42 @@ class Bridge:
             return 'ARC workspace form is ready. Review the visible cluster, account, GPU, and walltime, then launch when ready.'
         return 'ARC workspace form is ready. Choose an allocation you are authorized to use; ARC Chat will keep the selection visible for review before launch.'
 
+    async def recover_previous_workspace_url(self):
+        """Return an authenticated prior Jupyter URL when it is still live.
+
+        This is a read-only reachability check. It never starts a new ARC job or
+        replays notebook code, and it only trusts recovery state from the same
+        selected course/profile.
+        """
+        if not self.context:
+            return ''
+        raw_base = str(self.recovery_metadata.get('workspace_base') or '').strip()
+        if not raw_base:
+            return ''
+        recovery_profile = str(self.recovery_metadata.get('profile') or '')
+        profile_id = str(getattr(self.profile, 'id', '') or '')
+        if recovery_profile and (not profile_id or recovery_profile != profile_id):
+            return ''
+        try:
+            prior_base = base_url(raw_base)
+            if urlsplit(prior_base).hostname != 'ood.arc.vt.edu':
+                return ''
+            response = await self.context.request.fetch(
+                prior_base + 'api/kernelspecs', method='GET', timeout=8000, max_redirects=0
+            )
+            if response.status != 200:
+                return ''
+            notebook = str(self.recovery_metadata.get('notebook_path') or '').strip()
+            return prior_base + ('tree/' + quote(notebook, safe='/') if notebook else 'lab')
+        except Exception:
+            return ''
+
     async def start_workspace(self):
         """Student-mode entry point using an instructor/course profile."""
         allocation = self.profile.resolved_allocation()
         if not self.context:
             result = await self.ood.open()
-            # First-run authentication is deliberately visible.  Do not race a
+            # First-run authentication is deliberately visible. Do not race a
             # form interaction while the user is completing VT login/MFA.
             if self.state_machine.state != AppState.ARC_READY:
                 await self.emit('workspace_setup', stage='sign_in')
@@ -367,7 +431,64 @@ class Bridge:
             result = await self.ood.open()
             await self.emit('workspace_setup', stage='sign_in')
             return result
+        prior = await self.recover_previous_workspace_url()
+        if prior:
+            await self.emit('workspace_setup', stage='resume', job_id=self.last_job_id or '')
+            return await self.workspace.start(prior, 'python3')
         return await self.ood.prepare(allocation)
+
+    async def offer_connect_choices(self, candidates, page):
+        """Expose multiple ready OOD Jupyter sessions without guessing between them."""
+        self.connect_choices = {}
+        items = []
+        count = await candidates.count()
+        for index in range(count):
+            locator = candidates.nth(index)
+            choice_id = 'choice-' + uuid.uuid4().hex[:16]
+            label = f'Ready Jupyter workspace {index + 1}'
+            detail = ''
+            try:
+                info = await locator.evaluate("""el => {
+                    const root = el.closest('.batch_connect_session, .panel, .card, .row, li, article') || el.parentElement || el;
+                    return {
+                        text: (root.innerText || el.innerText || '').trim(),
+                        href: el.href || el.getAttribute('href') || ''
+                    };
+                }""")
+                text = re.sub(r'\s+', ' ', str((info or {}).get('text') or '')).strip()
+                href = str((info or {}).get('href') or '').strip()
+                if text:
+                    # Keep useful session metadata while avoiding an unreadable
+                    # dump of the whole OOD dashboard.
+                    detail = text[:360]
+                    if len(detail) > 90:
+                        label = detail[:87] + '...'
+                    else:
+                        label = detail
+                if href:
+                    detail = (detail + (' | ' if detail else '') + urlsplit(href).path)[:500]
+            except Exception:
+                pass
+            self.connect_choices[choice_id] = locator
+            items.append({'id': choice_id, 'label': label, 'detail': detail})
+        await self.set_state(AppState.ARC_READY, 'Several ready ARC workspaces need a user selection.', force=True)
+        await self.emit('workspace_choices', items=items)
+        await self.emit('workspace_setup', stage='choose_session')
+        return f'Found {len(items)} ready Jupyter workspaces. Choose the intended workspace in ARC Chat; nothing was connected automatically.'
+
+    async def connect_choice(self, choice_id, kernel_name='python3'):
+        locator = self.connect_choices.get(str(choice_id or ''))
+        if locator is None:
+            raise ValueError('That workspace choice is no longer available. Refresh the ready sessions and choose again.')
+        if not self.context:
+            raise ValueError('Open ARC and sign in first.')
+        before = [(p, p.url) for p in self.context.pages]
+        await locator.click()
+        self.connect_choices = {}
+        await self.set_state(AppState.JUPYTER_STARTING, 'Opening the selected Jupyter session.', force=True)
+        await self.capture_jupyter(before)
+        url = await self.discover_jupyter()
+        return await self.workspace.start(url, kernel_name)
 
     async def browser_click(self, action):
         if not self.context: raise ValueError('Open ARC and sign in first.')
@@ -388,7 +509,8 @@ class Bridge:
                 candidates=controls(re.compile(r'^Connect to Jupyter\s*$',re.I))
             count=await candidates.count()
             if count>1:
-                raise ValueError('Multiple ready Jupyter jobs found. Click the Notebook connection for your intended job in OOD, then choose Attach to Jupyter here.')
+                return await self.offer_connect_choices(candidates, page)
+            self.connect_choices = {}
             if count==0:
                 await self.set_state(AppState.JOB_QUEUED, 'ARC is still starting the Jupyter workspace.', force=True)
                 await self.emit('workspace_setup', stage='waiting')
@@ -430,6 +552,17 @@ class Bridge:
         servers={base_url(p.url):p for p in tabs}
         if len(servers)==1:
             self.jupyter_page=next(iter(servers.values()))
+            return self.jupyter_page.url
+        prior_base = ''
+        recovery_profile = str(self.recovery_metadata.get('profile') or '')
+        profile_id = str(getattr(self.profile, 'id', '') or '')
+        if recovery_profile and profile_id and recovery_profile == profile_id:
+            try:
+                prior_base = base_url(str(self.recovery_metadata.get('workspace_base') or ''))
+            except Exception:
+                prior_base = ''
+        if prior_base and prior_base in servers:
+            self.jupyter_page = servers[prior_base]
             return self.jupyter_page.url
         if not servers:
             raise ValueError('No Jupyter tab is ready yet. Click Connect ready session, or open Jupyter in the ARC browser, then click Attach automatically.')
@@ -757,12 +890,66 @@ class Bridge:
         if action=='open_dedicated_llm':
             result = await self.ood.open()
             return result + ' In the visible OOD dashboard, launch the dedicated LLM application, review its resources, then copy that session\'s API base and generated API key into Advanced Mode.'
+        if action=='browser_workspace':
+            provider = self.provider_registry.get('browser')
+            url = provider.launch_url
+            if not url:
+                raise ValueError('This course profile does not configure a browser notebook.')
+            webbrowser.open(url)
+            current_project = self.project_registry.current()
+            await self.emit('placement', item={
+                'provider_id':'browser',
+                'action':'use',
+                'reason':'Opened the course browser notebook. No ARC job was started.',
+                'confidence':'high',
+                'requires_review':False,
+                'launch_url':url,
+                'project_id':current_project.manifest.id if current_project else '',
+            })
+            return 'Browser notebook opened. No ARC job or local Python installation is required.'
+        if action=='placement_preview':
+            request = PlacementRequest(
+                mode=str(d.get('mode') or 'interactive'),
+                preferred_provider=str(d.get('preferred_provider') or 'auto'),
+                needs_gpu=bool(d.get('needs_gpu', False)),
+                requires_server_packages=bool(d.get('requires_server_packages', False)),
+                persistent_service=bool(d.get('persistent_service', False)),
+                estimated_input_mb=(int(d['estimated_input_mb']) if d.get('estimated_input_mb') not in (None, '') else None),
+            )
+            current_project = self.control_plane.current_project()
+            decision = self.control_plane.plan(request)
+            payload = decision.public_dict()
+            if decision.provider_id:
+                provider = self.provider_registry.get(decision.provider_id)
+                payload['provider'] = provider.public_dict()
+            payload['project_id'] = current_project.manifest.id if current_project else ''
+            await self.emit('placement', item=payload)
+            return 'Placement recommendation ready. No compute resource was started.'
+        if action=='project_status':
+            current_project = self.project_registry.current()
+            await self.emit('project', item=current_project.public_dict() if current_project else None)
+            return 'Project context refreshed.'
+        if action=='applications':
+            current_project = self.control_plane.current_project()
+            items = self.control_plane.applications.public_dicts(
+                project_id=current_project.manifest.id if current_project else ''
+            )
+            await self.emit('applications', items=items)
+            return f'Loaded {len(items)} application manifest(s).'
+        if action=='application_plan':
+            plan = self.control_plane.plan_application(str(d.get('application_id','')))
+            await self.emit('deployment_plan', item=plan.public_dict())
+            return 'Application deployment plan ready. No deployment was started.'
         if action=='start_workspace': return await self.start_workspace()
         if action=='prepare': return await self.ood.prepare(d['account'])
         if action=='launch': return await self.ood.launch()
         if action=='connect':
-            await self.ood.connect()
+            result = await self.ood.connect()
+            if self.connect_choices:
+                return result
             return await self.workspace.start(await self.ood.discover_jupyter(),d.get('kernel','python3'))
+        if action=='connect_choice':
+            return await self.connect_choice(str(d.get('choice_id','')), d.get('kernel','python3'))
         if action=='detach':
             await self.detach()
             self.jupyter_page=None
@@ -797,9 +984,12 @@ class Bridge:
                 'state':'disconnected', 'kernel':None, 'session':None,
                 'notebook':self.notebook_path, 'base':self.base,
             }
+            current_project = self.project_registry.current()
             await self.emit('workspace_inspector', item={
                 'backend': getattr(self.workspace, 'backend', 'unknown'),
                 'profile': self.profile.id,
+                'project': current_project.public_dict() if current_project else None,
+                'providers': self.provider_registry.public_dicts(),
                 'workspace': workspace,
                 'jobs_recorded': len(self.job_history.list()),
                 'artifacts_recorded': len(self.artifacts.list()),
@@ -832,6 +1022,9 @@ class Bridge:
             job_id = await backend.submit(spec)
             self.last_job_id = job_id
             self.job_history.record_submission(job_id, spec)
+            current_project = self.project_registry.current()
+            if current_project:
+                current_project.link('job', job_id, active=True)
             self.persist_recovery_state()
             await self.emit('job', item={'job_id':job_id, 'state':'SUBMITTED', 'name':spec.name})
             return f'Submitted Slurm job {job_id}. No compute command was run on the login node.'
@@ -841,6 +1034,10 @@ class Bridge:
                 self.job_history.update(item['job_id'], state=item.get('state',''), node=item.get('node',''), reason=item.get('reason',''))
             self.persist_recovery_state()
             await self.emit('jobs', items=items)
+            current_project = self.control_plane.current_project()
+            if current_project:
+                decision = self.control_plane.resolve(items)
+                await self.emit('job_resolution', item=decision.public_dict())
             return f'Found {len(items)} active/pending Slurm job(s).'
         if action=='job_status':
             item = await self.slurm_backend(d).status(str(d.get('job_id', '')).strip())
@@ -883,6 +1080,9 @@ class Bridge:
             self.vllm_service = await manager.start(spec, api_key=api_key)
             self.last_job_id = self.vllm_service.job_id
             self.job_history.record_submission(self.vllm_service.job_id, spec.job_spec(api_key=api_key), kind='vllm')
+            current_project = self.project_registry.current()
+            if current_project:
+                current_project.link('job', self.vllm_service.job_id, active=True)
             self.persist_recovery_state()
             self.remember_secret(self.vllm_service.api_key)
             await self.emit('service', item=self.service_public())
@@ -983,6 +1183,7 @@ async def guard(request, handler):
 async def index(request): return web.FileResponse(ROOT/'arc-chat.html')
 
 def integration_snapshot():
+    current_project = bridge.project_registry.current()
     return {
         'api_version': 1,
         'app_version': bridge.version,
@@ -990,6 +1191,8 @@ def integration_snapshot():
         'protocol_version': bridge.protocol_version,
         'state': bridge.state_machine.state.value,
         'profile': bridge.profile.id,
+        'project': current_project.public_dict() if current_project else None,
+        'providers': bridge.provider_registry.public_dicts(),
         'workspace': {
             'attached': bool(bridge.kernel),
             'notebook_path': bridge.notebook_path or '',
@@ -999,6 +1202,11 @@ def integration_snapshot():
             'read_status': True,
             'read_jobs': True,
             'read_artifacts': True,
+            'read_projects': True,
+            'read_providers': True,
+            'read_applications': True,
+            'preview_placement': True,
+            'plan_application': True,
             'submit_review_proposal': True,
             'execute_resource_mutation': False,
         },
@@ -1012,6 +1220,54 @@ async def api_artifacts(request):
 
 async def api_jobs(request):
     return web.json_response({'api_version':1, 'items':bridge.job_history.export_records()})
+
+async def api_projects(request):
+    return web.json_response({
+        'api_version':1,
+        'current_project_id':bridge.project_registry.current_project_id,
+        'items':bridge.project_registry.export_records(),
+    })
+
+async def api_providers(request):
+    return web.json_response({'api_version':1, 'items':bridge.provider_registry.public_dicts()})
+
+async def api_applications(request):
+    current_project = bridge.control_plane.current_project()
+    items = bridge.control_plane.applications.public_dicts(
+        project_id=current_project.manifest.id if current_project else ''
+    )
+    return web.json_response({'api_version':1, 'items':items})
+
+async def api_placement(request):
+    try:
+        value = await request.json()
+    except (json.JSONDecodeError, ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text='Placement body must be JSON.') from exc
+    if not isinstance(value, dict):
+        raise web.HTTPBadRequest(text='Placement body must be an object.')
+    try:
+        placement = PlacementRequest(
+            mode=str(value.get('mode') or 'interactive'),
+            preferred_provider=str(value.get('preferred_provider') or 'auto'),
+            needs_gpu=bool(value.get('needs_gpu', False)),
+            requires_server_packages=bool(value.get('requires_server_packages', False)),
+            persistent_service=bool(value.get('persistent_service', False)),
+            estimated_input_mb=(int(value['estimated_input_mb']) if value.get('estimated_input_mb') not in (None, '') else None),
+        )
+        decision = bridge.control_plane.plan(placement)
+        payload = decision.public_dict()
+        if decision.provider_id:
+            payload['provider'] = bridge.provider_registry.get(decision.provider_id).public_dict()
+    except (ValueError, TypeError) as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    return web.json_response({'api_version':1, 'placement':payload, 'executed':False})
+
+async def api_application_plan(request):
+    try:
+        plan = bridge.control_plane.plan_application(str(request.match_info.get('application_id','')))
+    except (KeyError, ValueError) as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    return web.json_response({'api_version':1, 'plan':plan.public_dict(), 'executed':False})
 
 async def api_proposals(request):
     if request.method == 'GET':
@@ -1097,6 +1353,8 @@ async def socket(request):
                                 'display':bridge.state_machine.state.value.replace('_',' ').title(),
                                 'profile':bridge.profile.public_dict(),
                                 'profile_error':bridge.profile_error,
+                                'project':bridge.project_registry.current().public_dict() if bridge.project_registry.current() else None,
+                                'providers':bridge.provider_registry.public_dicts(),
                                 'resource_profiles':[profile.public_dict() for profile in RESOURCE_PROFILES.values()]})
         if bridge.recovery_metadata.get('notebook_path') or bridge.recovery_metadata.get('job_id'):
             await ws.send_json({'type':'recovery',
@@ -1193,6 +1451,11 @@ def create_app(*, include_lifecycle=True, include_launch=False):
     app.router.add_get('/api/v1/status',api_status)
     app.router.add_get('/api/v1/artifacts',api_artifacts)
     app.router.add_get('/api/v1/jobs',api_jobs)
+    app.router.add_get('/api/v1/projects',api_projects)
+    app.router.add_get('/api/v1/providers',api_providers)
+    app.router.add_get('/api/v1/applications',api_applications)
+    app.router.add_post('/api/v1/placement',api_placement)
+    app.router.add_post('/api/v1/applications/{application_id}/plan',api_application_plan)
     app.router.add_get('/api/v1/proposals',api_proposals)
     app.router.add_post('/api/v1/proposals',api_proposals)
     app.router.add_delete('/api/v1/proposals/{proposal_id}',api_proposal_delete)

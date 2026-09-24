@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "applications": [
+    {
+      "id": "browser-notebook",
+      "name": "FL 2744 Browser Notebook",
+      "project_id": "fl2744",
+      "application_type": "browser",
+      "runtime": "python",
+      "provider": "browser",
+      "audience": "course",
+      "requires_gpu": false,
+      "requires_server_packages": false,
+      "persistent_service": false,
+      "estimated_input_mb": 20,
+      "metadata": {
+        "purpose": "zero-install course notebook"
+      }
+    }
+  ]
+}

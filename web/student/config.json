@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "title": "FL 2744 Compute",
+  "subtitle": "Start small in the browser. Use ARC when the work actually needs research compute.",
+  "notebook_url": "https://fl2744.github.io/jupyterlite/lab/index.html",
+  "applications": [
+    {
+      "id": "jupyterlite",
+      "name": "Browser notebook",
+      "description": "Python and notebooks run directly in your browser. No ARC job, VPN workflow, or local installation.",
+      "status": "Instant",
+      "action": "Open notebook",
+      "view": "notebook",
+      "enabled": true
+    },
+    {
+      "id": "arc",
+      "name": "ARC workspace",
+      "description": "Use ARC for server-side packages, larger datasets, GPUs, or longer-running research work.",
+      "status": "Research compute",
+      "action": "Open ARC workspace",
+      "url": "",
+      "enabled": false
+    }
+  ]
+}
