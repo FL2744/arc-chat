@@ -33,7 +33,7 @@ jobs:
       - name: Install runtime dependencies
         run: python -m pip install -r requirements.txt
       - name: Compile Python modules
-        run: python -m py_compile helper.py config.py state.py model_providers.py diagnostics.py ood.py workspace.py protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py control_plane.py apps.py errors.py version.py
+        run: python -m py_compile helper.py config.py state.py model_providers.py diagnostics.py ood.py workspace.py protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py errors.py version.py
       - name: Run unit and reconnect tests
         run: python -m unittest discover -s . -p 'test_*.py' -v
 
@@ -52,7 +52,7 @@ jobs:
       - name: Verify packaged Python modules are declared
         shell: bash
         run: |
-          for file in helper.py config.py state.py model_providers.py diagnostics.py ood.py workspace.py protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py control_plane.py apps.py errors.py version.py arc-chat.html requirements.txt profiles.example.json applications.example.json CONTRIBUTORS.md SECURITY.md SUPPORT.md; do
+          for file in helper.py config.py state.py model_providers.py diagnostics.py ood.py workspace.py protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py errors.py version.py arc-chat.html requirements.txt profiles.example.json applications.example.json CONTRIBUTORS.md SECURITY.md SUPPORT.md; do
             test -f "$file"
           done
       - name: Build Windows and Linux bootstrap bundles
@@ -69,7 +69,7 @@ jobs:
         run: |
           for archive in dist/ARC-Chat-Windows.zip dist/ARC-Chat-Linux.zip; do
             unzip -l "$archive"
-            for file in protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py control_plane.py apps.py errors.py version.py applications.example.json CONTRIBUTORS.md SECURITY.md SUPPORT.md; do
+            for file in protocol.py security.py context_window.py artifacts.py jobs.py services.py integration.py projects.py providers.py resolver.py workspaces.py control_plane.py apps.py errors.py version.py applications.example.json CONTRIBUTORS.md SECURITY.md SUPPORT.md; do
               unzip -l "$archive" | grep -q "$file"
             done
           done
