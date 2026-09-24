@@ -4,10 +4,20 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from distribution.build_student_web import build_archive, validate_config
+from distribution.build_student_web import FORBIDDEN_PUBLIC_RUNTIME_RE, build_archive, validate_config
 
 
 class StudentWebDistributionTests(unittest.TestCase):
+    def test_public_runtime_guard_detects_loopback_hosts_and_tokenized_helper_paths(self):
+        for value in (
+            "http://127.0.0.1:8000",
+            "https://localhost:8443",
+            "ws://127.0.0.1:9000",
+            "https://example.edu/ws?token=private",
+        ):
+            with self.subTest(value=value):
+                self.assertIsNotNone(FORBIDDEN_PUBLIC_RUNTIME_RE.search(value))
+
     def test_public_config_is_valid_and_bundle_contains_only_static_surface(self):
         with tempfile.TemporaryDirectory() as directory:
             archive, checksum = build_archive(Path(directory))

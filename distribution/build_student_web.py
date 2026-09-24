@@ -17,7 +17,7 @@ WEB_ROOT = ROOT / "web" / "student"
 DEFAULT_DIST = ROOT / "dist"
 FILES = ("index.html", "config.json", "README.md")
 SECRET_KEY_RE = re.compile(r"(api[_-]?key|password|secret|token|cookie|credential)", re.I)
-FORBIDDEN_PUBLIC_RUNTIME_RE = re.compile(r"(?:127\\.0\\.0\\.1|localhost|ws://|wss://127\\.0\\.0\\.1|/ws\\?token=)", re.I)
+FORBIDDEN_PUBLIC_RUNTIME_RE = re.compile(r"(?:127\.0\.0\.1|localhost|ws://|wss://127\.0\.0\.1|/ws\?token=)", re.I)
 
 
 def _https_url(value: str, label: str) -> str:
