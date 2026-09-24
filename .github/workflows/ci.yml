@@ -55,8 +55,14 @@ jobs:
           node-version: '22'
       - name: Check Student Web JavaScript syntax
         run: python distribution/check_student_js.py
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       - name: Build standalone hosted gateway image
         run: docker build --file Dockerfile.gateway --tag arc-chat-gateway:ci .
+      - name: Install OpenAPI validator
+        run: python -m pip install openapi-spec-validator==0.9.0
+      - name: Validate hosted gateway OpenAPI contract
+        run: python -m openapi_spec_validator docs/hosted-gateway-openapi.yaml
       - name: Verify packaged Python modules are declared
         shell: bash
         run: |
@@ -83,10 +89,26 @@ jobs:
           done
 
   integration:
-    name: Local Jupyter integration
+    name: Hosted gateway PostgreSQL and local Jupyter integration
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: arcchat
+          POSTGRES_PASSWORD: arcchat
+          POSTGRES_DB: arcchat_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U arcchat -d arcchat_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/playwright-browsers
+      DATABASE_URL: postgresql://arcchat:arcchat@localhost:5432/arcchat_test
+      ARC_CHAT_TEST_DATABASE_URL: postgresql://arcchat:arcchat@localhost:5432/arcchat_test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -96,7 +118,11 @@ jobs:
           python-version: '3.12'
           cache: pip
       - name: Install runtime/integration dependencies
-        run: python -m pip install -r requirements.txt -r requirements-test.txt
+        run: python -m pip install -r requirements.txt -r requirements-test.txt -r requirements-gateway.txt
+      - name: Apply PostgreSQL migrations to the fresh service database
+        run: python -m hosted_gateway.migrate
+      - name: Run PostgreSQL-backed gateway acceptance tests
+        run: python -m unittest -v test_postgres_gateway
       - name: Install Chromium and Linux browser dependencies
         run: python -m playwright install --with-deps chromium
       - name: Run real local Jupyter/UI integration

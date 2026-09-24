@@ -489,6 +489,13 @@ async def workspace_create(request: web.Request) -> web.Response:
         )
         if not membership or "browser" not in membership["allowed_providers"]:
             return 403, error_body("PROJECT_FORBIDDEN", "You cannot start a browser workspace for this project.", request[REQUEST_ID_KEY])
+        # Different idempotency keys can still represent the same semantic
+        # workspace request. Serialize that check-and-create section so two
+        # concurrent requests cannot both observe an empty active-workspace set.
+        await connection.execute(
+            "SELECT pg_advisory_xact_lock(hashtext($1),hashtext($2))",
+            actor["id"], f"{project_id}:{application_id or ''}",
+        )
         existing = await connection.fetchrow(
             """SELECT id,state FROM workspaces WHERE owner_id=$1 AND project_id=$2 AND provider_id='browser'
                  AND application_id IS NOT DISTINCT FROM $3 AND state=ANY($4::varchar[]) AND deleted_at IS NULL
