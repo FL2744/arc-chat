@@ -26,7 +26,7 @@ This architectural release establishes the project/workspace control plane and a
 
 - Full local unit suite after the environment-renderer changes: **149 tests passed; 2 PostgreSQL-only tests skipped without a local database**.
 - Python compile gate: passed for gateway, control-plane, and distribution modules.
-- The GitHub Actions matrix passed on the v0.5 foundation commit, including the fresh PostgreSQL integration service, Docker image build, OpenAPI validation, and portable package smoke checks. The first full Grype scan found Debian base-image advisories and failed the initial all-high/critical gate; the gate now distinguishes fixable findings while retaining the full report, and must pass on this image before release.
+- The full 13-job GitHub Actions matrix passed on `d651626`, including fresh PostgreSQL migrations/API tests, Docker build, SBOM, full Grype report, OpenAPI validation, Student Web/bootstrap bundles, and Windows/macOS package smokes. The complete Grype report had no Critical matches and retained 49 High package matches with no fixes available in the database snapshot; the actionable High/Critical gate passed. Keep the report for operator/security disposition before production use: [CI run](https://github.com/FL2744/arc-chat/actions/runs/36071213048).
 - CI does not replace OIDC claim verification, a Common Platform deployment, or an authorized ARC acceptance pass.
 
 ## Activation work still required

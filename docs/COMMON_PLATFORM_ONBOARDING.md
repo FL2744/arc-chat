@@ -20,8 +20,8 @@ host user notebook files or research datasets.
 
 ## Current implementation
 
-- `Dockerfile.gateway` builds a Python 3.12 gateway image from a digest-pinned
-  base, installs only gateway dependencies, runs as UID/GID 10001, exposes port
+- `Dockerfile.gateway` builds a Python 3.14 gateway image from a digest-pinned
+  Debian Trixie base, installs only gateway dependencies, runs as UID/GID 10001, exposes port
   8080, and uses SIGTERM as its stop signal.
 - The gateway serves `/health/live`, `/health/ready`, `/metrics`, and versioned
   `/api/v1` routes. Readiness checks PostgreSQL.
