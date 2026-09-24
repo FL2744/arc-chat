@@ -124,16 +124,23 @@ class RecoveryTests(unittest.IsolatedAsyncioTestCase):
                 bridge.notebook_path = "ARC-chat-test.ipynb"
                 bridge.session = "session-123"
                 bridge.last_job_id = "4567"
+                bridge.remember_workspace(
+                    "arc", bridge.base, kind="interactive", state="ready",
+                    display_name="ARC Jupyter workspace",
+                )
                 bridge.persist_recovery_state()
                 rendered = path.read_text(encoding="utf-8")
                 self.assertNotIn("model-secret-key", rendered)
                 self.assertNotIn("another-secret-value", rendered)
                 saved = json.loads(rendered)
-                self.assertEqual(saved["version"], 3)
+                self.assertEqual(saved["version"], 4)
                 self.assertEqual(saved["job_id"], "4567")
                 self.assertEqual(saved["notebook_path"], "ARC-chat-test.ipynb")
                 self.assertEqual(saved["current_project_id"], "fl2744")
                 self.assertTrue(saved["projects"])
+                self.assertTrue(saved["workspaces"])
+                self.assertEqual(saved["current_workspace_id"], saved["workspaces"][0]["id"])
+                self.assertNotIn("example.org", json.dumps(saved["workspaces"]))
             finally:
                 if previous is None:
                     os.environ.pop("ARC_CHAT_RECOVERY_STATE", None)
