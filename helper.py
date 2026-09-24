@@ -1242,6 +1242,7 @@ def integration_snapshot():
         'workspace': {
             'attached': bool(bridge.kernel),
             'notebook_path': bridge.notebook_path or '',
+            'record': bridge.workspace_registry.current().public_dict() if bridge.workspace_registry.current() else None,
         },
         'last_job_id': bridge.last_job_id,
         'capabilities': {
@@ -1249,6 +1250,7 @@ def integration_snapshot():
             'read_jobs': True,
             'read_artifacts': True,
             'read_projects': True,
+            'read_workspaces': True,
             'read_providers': True,
             'read_applications': True,
             'preview_placement': True,
@@ -1272,6 +1274,19 @@ async def api_projects(request):
         'api_version':1,
         'current_project_id':bridge.project_registry.current_project_id,
         'items':bridge.project_registry.export_records(),
+    })
+
+async def api_workspaces(request):
+    current_project = bridge.control_plane.current_project()
+    items = [
+        item.public_dict() for item in bridge.workspace_registry.list(
+            project_id=current_project.manifest.id if current_project else ''
+        )
+    ]
+    return web.json_response({
+        'api_version':1,
+        'current_workspace_id':bridge.workspace_registry.current_workspace_id,
+        'items':items,
     })
 
 async def api_providers(request):
@@ -1498,6 +1513,7 @@ def create_app(*, include_lifecycle=True, include_launch=False):
     app.router.add_get('/api/v1/artifacts',api_artifacts)
     app.router.add_get('/api/v1/jobs',api_jobs)
     app.router.add_get('/api/v1/projects',api_projects)
+    app.router.add_get('/api/v1/workspaces',api_workspaces)
     app.router.add_get('/api/v1/providers',api_providers)
     app.router.add_get('/api/v1/applications',api_applications)
     app.router.add_post('/api/v1/placement',api_placement)
