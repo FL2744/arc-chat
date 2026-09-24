@@ -67,15 +67,24 @@ jobs:
           output-file: arc-chat-gateway.spdx.json
           upload-artifact: false
           upload-release-assets: false
-      - name: Scan gateway image for high and critical vulnerabilities
+      - name: Scan gateway image and save the complete vulnerability report
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
         id: gateway-scan
         with:
           image: arc-chat-gateway:ci
           output-format: json
           output-file: arc-chat-gateway-grype.json
+          fail-build: false
+          cache-db: true
+      - name: Block fixable high and critical gateway image vulnerabilities
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: arc-chat-gateway:ci
+          output-format: table
           severity-cutoff: high
           fail-build: true
+          only-fixed: true
+          cache-db: true
       - name: Upload gateway SBOM and vulnerability report
         if: always()
         uses: actions/upload-artifact@v4

@@ -36,9 +36,11 @@ host user notebook files or research datasets.
 - Rendered gateway and OAuth proxy containers run non-root with read-only root
   filesystems, dropped capabilities, no privilege escalation, resource
   requests/limits, probes, and a restricted NetworkPolicy.
-- CI builds the production image and exercises the API against PostgreSQL. A
-  successful image build is not a substitute for an institutional registry
-  scan, SBOM policy, or deployment review.
+- CI builds the production image, generates an SPDX SBOM, retains the complete
+  Grype vulnerability report, and blocks known high/critical findings when a
+  fix is available. Findings without an available fix remain in the report for
+  operator/security review; passing this CI policy is not a substitute for the
+  platform's registry scan or deployment review.
 - The static client has no gateway origin configured yet. ARC actions remain
   unavailable in the hosted client until an approved delegation method exists.
 
@@ -176,9 +178,9 @@ approved store.
   origins, security headers, audit/log redaction, and ingress timeouts in the
   approved deployment.
 - Run platform-approved vulnerability and dependency scans, generate an SBOM,
-  and resolve policy findings before onboarding real users. The repository CI
-  currently builds the image but does not claim those institutional scan gates
-  have passed.
+  and resolve or formally disposition all policy findings before onboarding
+  real users. Repository CI retains the full scanner report, but does not claim
+  that institutional scan gates have passed.
 
 ## Ownership proposal to confirm
 
@@ -223,4 +225,3 @@ and logs, and recovery after gateway restart. It must reject a cross-project
 read/write, survive a database-backed restart, and show no ARC mutation or
 application deployment capability unless a separately reviewed adapter is
 enabled.
-

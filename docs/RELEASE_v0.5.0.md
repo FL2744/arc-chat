@@ -19,14 +19,14 @@ This architectural release establishes the project/workspace control plane and a
 - Added an operator CLI for provisioning project/application manifests and course-group mappings.
 - Added a static Projects view with optional gateway sign-in, project selection, browser-workspace records, and non-mutating ARC placement review.
 - Added a fail-closed Kubernetes renderer with non-root/read-only containers, an OIDC proxy sidecar, External Secrets, TLS ingress, explicit network policy CIDRs, replicas, and disruption budget.
-- Added a CI-generated SPDX SBOM and Grype image scan; CI blocks gateway images with high or critical known vulnerabilities and retains the reports as workflow artifacts.
+- Added a CI-generated SPDX SBOM and complete Grype image report; CI blocks fixable high/critical findings and retains the report, including findings that still need operator/security review.
 - Kept ARC and Common Platform mutations disabled until their institutionally supported provider adapters and credentials are available.
 
 ## Verification
 
 - Full local unit suite after the environment-renderer changes: **149 tests passed; 2 PostgreSQL-only tests skipped without a local database**.
 - Python compile gate: passed for gateway, control-plane, and distribution modules.
-- The GitHub Actions matrix passed on the v0.5 foundation commit, including the fresh PostgreSQL integration service, Docker image build, OpenAPI validation, and portable package smoke checks. The follow-up SBOM/vulnerability gate is being added in this change and must pass before release.
+- The GitHub Actions matrix passed on the v0.5 foundation commit, including the fresh PostgreSQL integration service, Docker image build, OpenAPI validation, and portable package smoke checks. The first full Grype scan found Debian base-image advisories and failed the initial all-high/critical gate; the gate now distinguishes fixable findings while retaining the full report, and must pass on this image before release.
 - CI does not replace OIDC claim verification, a Common Platform deployment, or an authorized ARC acceptance pass.
 
 ## Activation work still required
