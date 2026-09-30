@@ -1,4 +1,4 @@
-"""Provider-neutral control-plane facade shared by local ARC Chat and future hosted gateways."""
+"""Provider-neutral control-plane facade shared by local ARC Research and future hosted gateways."""
 
 from __future__ import annotations
 

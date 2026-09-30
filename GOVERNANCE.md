@@ -1,6 +1,6 @@
-# ARC Chat governance
+# ARC Research governance
 
-ARC Chat is currently maintained as a small project rather than a Virginia Tech centrally managed service.
+ARC Research is currently maintained as a small project rather than a Virginia Tech centrally managed service.
 
 ## Decision model
 

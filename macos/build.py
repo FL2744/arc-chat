@@ -1,8 +1,8 @@
-"""Build ARC Chat.app on macOS: python3 macos/build.py."""
+"""Build ARC Research.app on macOS: python3 macos/build.py."""
 import json, pathlib, plistlib, runpy, shutil, subprocess
 root=pathlib.Path(__file__).resolve().parent.parent
 version=runpy.run_path(root/'version.py')['VERSION']
-app=root/'dist/ARC Chat.app'
+app=root/'dist/ARC Research.app'
 app.parent.mkdir(exist_ok=True)
 subprocess.run(['osacompile','-o',str(app),str(root/'macos/app.applescript')],check=True)
 resources=app/'Contents/Resources'
@@ -13,7 +13,7 @@ for name in ('launcher.py','launch.sh'):
 (resources/'runtime.json').write_text(json.dumps({'existing_runtime':str(root)}))
 p=app/'Contents/Info.plist'
 d=plistlib.loads(p.read_bytes())
-d.update(CFBundleIdentifier='edu.research.arc-chat.local',CFBundleName='ARC Chat',CFBundleDisplayName='ARC Chat',CFBundleShortVersionString=version,NSHighResolutionCapable=True)
+d.update(CFBundleIdentifier='edu.research.arc-chat.local',CFBundleName='ARC Research',CFBundleDisplayName='ARC Research',CFBundleShortVersionString=version,NSHighResolutionCapable=True)
 p.write_bytes(plistlib.dumps(d))
 subprocess.run(['codesign','--force','--deep','--sign','-',str(app)],check=True)
 print(app)

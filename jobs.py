@@ -48,13 +48,13 @@ class JobSpec:
         if not WALLTIME_RE.fullmatch(self.walltime):
             raise ValueError("Walltime must look like HH:MM:SS or D-HH:MM:SS.")
         if not (1 <= self.nodes <= 32 and 1 <= self.ntasks_per_node <= 1024 and 1 <= self.cpus_per_task <= 1024):
-            raise ValueError("Requested Slurm CPU/task shape is outside ARC Chat safety limits.")
+            raise ValueError("Requested Slurm CPU/task shape is outside ARC Research safety limits.")
         if not (0 <= self.gpus <= 32):
-            raise ValueError("GPU count is outside ARC Chat safety limits.")
+            raise ValueError("GPU count is outside ARC Research safety limits.")
         if self.gpus and not re.fullmatch(r"[A-Za-z0-9_.-]{1,32}", self.gpu_type):
             raise ValueError("Invalid GPU type.")
         if self.memory_gb is not None and not (1 <= self.memory_gb <= 4096):
-            raise ValueError("Memory request is outside ARC Chat safety limits.")
+            raise ValueError("Memory request is outside ARC Research safety limits.")
         if not self.command.strip() or "\x00" in self.command:
             raise ValueError("Job command cannot be empty or contain NUL bytes.")
         if not re.fullmatch(r"[A-Za-z0-9_.%/-]{1,160}", self.output):
@@ -243,7 +243,7 @@ class SshCommandGateway:
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", username or ""):
             raise ValueError("Invalid ARC username.")
         if host not in LOGIN_HOSTS:
-            raise ValueError("ARC Chat currently supports documented Falcon login hosts only.")
+            raise ValueError("ARC Research currently supports documented Falcon login hosts only.")
         self.username = username
         self.host = host
 

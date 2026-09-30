@@ -1,4 +1,4 @@
-"""Structured, user-actionable ARC Chat error classification."""
+"""Structured, user-actionable ARC Research error classification."""
 
 from __future__ import annotations
 
@@ -17,10 +17,12 @@ def classify_error(value: object, *, redactor=str) -> ErrorInfo:
     lower = message.lower()
     if "wait for the current action" in lower or "already in progress" in lower:
         return ErrorInfo("ACTION_BUSY", message, "Wait for the active action to finish, or interrupt Python if it is running.")
+    if "could not validate username" in lower or "looks like an email" in lower:
+        return ErrorInfo("ARC_USERNAME_INVALID", message, "Use your ARC username rather than your Virginia Tech email address, then retry the connection test.")
     if "ssh" in lower and ("timed out" in lower or "failed" in lower or "not installed" in lower or "not on path" in lower):
         return ErrorInfo("ARC_SSH_UNAVAILABLE", message, "Connect to the VT network/VPN, verify OpenSSH and SSH-key authentication to Falcon, then retry.")
     if "model api http 429" in lower or ("rate" in lower and "limit" in lower):
-        return ErrorInfo("MODEL_RATE_LIMITED", message, "ARC is busy. ARC Chat uses bounded retries; retry later if the limit persists.")
+        return ErrorInfo("MODEL_RATE_LIMITED", message, "ARC is busy. ARC Research uses bounded retries; retry later if the limit persists.")
     if "model api is temporarily unreachable" in lower:
         return ErrorInfo("MODEL_UNREACHABLE", message, "Check network/VPN access and the configured model endpoint, then retry the model request.")
     if "no jupyter tab" in lower or "jupyter is still opening" in lower:

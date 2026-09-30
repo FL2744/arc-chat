@@ -1,4 +1,4 @@
-"""Human-behavior stress cases for classroom ARC Chat usage.
+"""Human-behavior stress cases for classroom ARC Research usage.
 
 These tests intentionally model individual user mistakes/recovery sequences rather
 than only exercising isolated helpers.  A failure name should describe the

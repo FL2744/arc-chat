@@ -1,6 +1,6 @@
 ![arc-chat logo](arc-chat-logo.png)
 
-# ARC Research Chat
+# ARC Research
 
 One self-contained HTML interface plus a local Python browser/Jupyter helper. The helper opens a separate Chromium window for VT login/MFA; no VT passwords are entered into the chatbot. VPN must be enabled using your normal client.
 
@@ -8,7 +8,7 @@ A simple web implementation can be found here: https://l1001.vt.domains/arc-chat
 
 ## Contributors
 
-ARC Chat was created by **William Taggart**. **Alejandro Grenier** is a major development contributor across the current architecture, reliability/security hardening, Windows and cross-platform packaging, Student Mode onboarding/UX, automated testing, and Advanced ARC workflows including Slurm and managed vLLM. See [`CONTRIBUTORS.md`](CONTRIBUTORS.md) and the Git history for attribution details.
+ARC Research was created by **William Taggart**. **Alejandro Grenier** is a major development contributor across the current architecture, reliability/security hardening, Windows and cross-platform packaging, Student Mode onboarding/UX, automated testing, and Advanced ARC workflows including Slurm and managed vLLM. See [`CONTRIBUTORS.md`](CONTRIBUTORS.md) and the Git history for attribution details.
 
 ## Downloads
 
@@ -16,9 +16,9 @@ ARC Chat was created by **William Taggart**. **Alejandro Grenier** is a major de
 
 The links above are published through ordinary Git rather than the GitHub Release asset API, which makes the classroom-sized downloads independently recoverable from release-service outages. SHA-256 files are stored beside each download on the `release-assets-v0.4.1` branch.
 
-**Windows:** unzip **ARC-Chat-Windows.zip**, then double-click **ARC Chat.cmd**. Python 3.10+ is required; first launch creates the local runtime and downloads the compatible Chromium browser.
+**Windows:** unzip **ARC-Chat-Windows.zip**, then double-click **ARC Research.cmd**. Python 3.10+ is required; first launch creates the local runtime and downloads the compatible Chromium browser.
 
-**macOS:** unzip **ARC-Chat-macOS.zip**, move **ARC Chat.app** to Applications, and open it. First launch creates the local runtime and downloads dependencies/Chromium. Preview builds are not Apple-notarized, so macOS may require explicit approval to open them.
+**macOS:** unzip **ARC-Chat-macOS.zip**, move **ARC Research.app** to Applications, and open it. First launch creates the local runtime and downloads dependencies/Chromium. Preview builds are not Apple-notarized, so macOS may require explicit approval to open them.
 
 **Linux:** run `./arc-chat`; Python 3.10+ and internet access are required for first-time dependency and Chromium setup.
 
@@ -28,7 +28,7 @@ VT VPN is still required when normal ARC access requires it.
 
 ## Start
 
-To build the macOS wrapper, run `python3 macos/build.py`, then double-click **dist/ARC Chat.app**. No Terminal command is needed. Stop any existing Terminal-launched helper first with Control-C. Use **Quit helper** in the chat to stop the background helper. See `macos/README.md` for app setup details.
+To build the macOS wrapper, run `python3 macos/build.py`, then double-click **dist/ARC Research.app**. No Terminal command is needed. Stop any existing Terminal-launched helper first with Control-C. Use **Quit helper** in the chat to stop the background helper. See `macos/README.md` for app setup details.
 
 Requires Python 3.10+ and internet access for first-time dependency installation.
 
@@ -49,7 +49,7 @@ python -m venv .venv
 
 The helper opens the HTML interface at a local address with a random access token. Keep the terminal open. No web hosting, Node.js, API SDK, or ARC-side software installation is required. Do not expose port 8765 to the network.
 
-Student Mode uses the selected course profile and keeps infrastructure details out of the normal workflow. A course may preconfigure its allocation through `ARC_COURSE_ALLOCATION`; if it does not, ARC Chat opens the normal visible OOD Jupyter form and surfaces only the allocations already available to the signed-in ARC account. The user selects and reviews an authorized allocation before launch. The repository contains no personal or public default allocation.
+Student Mode uses the selected course profile and keeps infrastructure details out of the normal workflow. A course may preconfigure its allocation through `ARC_COURSE_ALLOCATION`; if it does not, ARC Research opens the normal visible OOD Jupyter form and surfaces only the allocations already available to the signed-in ARC account. The user selects and reviews an authorized allocation before launch. The repository contains no personal or public default allocation.
 
 ### Browser-first / CLAHS platform foundation
 
@@ -64,7 +64,7 @@ The optional hosted gateway now has an aiohttp API, PostgreSQL migrations, an OI
 ## Connect and work
 
 1. Enable VT VPN if needed and click **Open ARC & sign in** in Student Mode. Complete VT credentials and MFA in the visible Chromium window.
-2. If the course profile does not preconfigure an allocation, choose one of the allocations already authorized for the signed-in ARC account. Review the visible OOD Jupyter form, including allocation, GPU, and walltime, before launching it. ARC Chat never silently chooses or launches an allocation.
+2. If the course profile does not preconfigure an allocation, choose one of the allocations already authorized for the signed-in ARC account. Review the visible OOD Jupyter form, including allocation, GPU, and walltime, before launching it. ARC Research never silently chooses or launches an allocation.
 3. After submission, Student Mode checks Jupyter readiness for a bounded period without relaunching the job. **Check now** and **Open ARC** remain available. When Jupyter is ready, attach the workspace; the helper captures the opened tab and attaches automatically. This creates a new persistent Python kernel and a uniquely named `ARC-chat-....ipynb` notebook in the Jupyter root. Choose an installed kernel name if `python3` is unavailable.
 4. Enter the model API key for the selected provider. Student Mode uses the Virginia Tech ARC shared endpoint and the course profile's model policy. Advanced Mode can also use a dedicated ARC Open OnDemand LLM session, a reviewed ARC vLLM job through a localhost SSH tunnel, OpenAI, or a custom OpenAI-compatible endpoint. Dedicated ARC endpoints are restricted to ARC HTTPS hosts; arbitrary custom endpoints must use public HTTPS and may not target local/private addresses. Managed-vLLM keys stay inside the helper.
 5. Send a request, review proposed Python, and click **Run Python**. Outputs appear as they arrive. Click **Continue with outputs** to let the model inspect the results and propose the next step. Each proposed execution requires a click; there is no unattended execution loop.
@@ -77,9 +77,9 @@ The optional hosted gateway now has an aiohttp API, PostgreSQL migrations, an OI
 Advanced Mode contains an experimental ARC job/service layer. It is intentionally separate from the normal classroom path and does not run arbitrary compute work on a login node.
 
 - **Workspace inspector:** shows the active backend/profile/Jupyter identifiers plus counts for recorded jobs/artifacts without exposing credentials.
-- **Slurm jobs:** choose one of the documented Falcon L40S/A30/V100/T4 resource profiles or custom reviewed values, enter your VT PID and authorized allocation, review the generated `sbatch` script, then explicitly submit it. Status, active-job listing, recent stdout, cancellation, durable non-secret job history, and artifact links use the documented Falcon/OpenSSH/Slurm path. Password/Duo prompts are never collected by ARC Chat.
-- **Dedicated OOD LLM:** open the normal visible ARC OOD dashboard, launch/review the dedicated LLM application there, then enter that session's ARC-hosted API base and unique generated key. ARC Chat does not invent or depend on an undocumented hidden OOD launch API.
-- **Managed vLLM:** review a Slurm job for a model already available under ARC's `/common/data/models/` tree, submit it, wait until Slurm reports a running compute node, then explicitly start the SSH tunnel. Model traffic goes only to the resulting loopback endpoint. ARC Chat refuses to use the managed provider until a tracked tunnel process is actually alive.
+- **Slurm jobs:** choose one of the documented Falcon L40S/A30/V100/T4 resource profiles or custom reviewed values, enter your VT PID and authorized allocation, review the generated `sbatch` script, then explicitly submit it. Status, active-job listing, recent stdout, cancellation, durable non-secret job history, and artifact links use the documented Falcon/OpenSSH/Slurm path. Password/Duo prompts are never collected by ARC Research.
+- **Dedicated OOD LLM:** open the normal visible ARC OOD dashboard, launch/review the dedicated LLM application there, then enter that session's ARC-hosted API base and unique generated key. ARC Research does not invent or depend on an undocumented hidden OOD launch API.
+- **Managed vLLM:** review a Slurm job for a model already available under ARC's `/common/data/models/` tree, submit it, wait until Slurm reports a running compute node, then explicitly start the SSH tunnel. Model traffic goes only to the resulting loopback endpoint. ARC Research refuses to use the managed provider until a tracked tunnel process is actually alive.
 - **Endpoint registry:** records non-secret provider/model/endpoint reachability (`direct`, `arc_session`, or `loopback_tunnel`) for the current runtime. API keys are never part of the registry.
 - **Artifacts/pipelines:** uploads and job outputs can be represented as durable provenance records. Pipeline graphs are validated as acyclic metadata contracts; resource/code mutations still require explicit review rather than autonomous execution.
 
@@ -87,7 +87,7 @@ These Advanced controls are implemented against the official ARC documentation a
 
 ## Local integration API
 
-ARC Chat exposes a token-protected, loopback-only `/api/v1` contract for separate research applications:
+ARC Research exposes a token-protected, loopback-only `/api/v1` contract for separate research applications:
 
 - `GET /api/v1/status` - non-secret application/workspace status and capability flags;
 - `GET /api/v1/jobs` - local non-secret Slurm/job provenance;
@@ -100,7 +100,7 @@ ARC Chat exposes a token-protected, loopback-only `/api/v1` contract for separat
 - `GET/POST /api/v1/proposals` - inspect or submit a handoff proposal for human review;
 - `DELETE /api/v1/proposals/{id}` - dismiss a proposal.
 
-There are deliberately **no** external HTTP routes for Python execution, file mutation, Slurm submit/cancel, or model-service start/stop. External tools request reviewed handoffs; ARC Chat remains the human-approval boundary. See `examples/integration_client.py` for a standard-library example.
+There are deliberately **no** external HTTP routes for Python execution, file mutation, Slurm submit/cancel, or model-service start/stop. External tools request reviewed handoffs; ARC Research remains the human-approval boundary. See `examples/integration_client.py` for a standard-library example.
 
 ## Run an existing notebook
 

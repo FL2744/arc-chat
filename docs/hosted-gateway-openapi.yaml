@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: ARC Chat Hosted Gateway
+  title: ARC Research Hosted Gateway
   version: 0.5.0
   description: Authenticated project and workspace API. Provider mutations require an approved server-side adapter.
 servers:

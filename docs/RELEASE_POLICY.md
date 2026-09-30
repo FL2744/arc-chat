@@ -1,6 +1,6 @@
 # Release and deprecation policy
 
-ARC Chat is currently a preview project.
+ARC Research is currently a preview project.
 
 ## Versioning
 

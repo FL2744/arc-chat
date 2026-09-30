@@ -164,7 +164,7 @@ class VllmServiceSpec:
         if not MODEL_NAME_RE.fullmatch(self.served_model_name):
             raise ValueError("Invalid served model name.")
         if not (1 <= self.gpus <= 8 and 1 <= self.cpus <= 256):
-            raise ValueError("vLLM resource request is outside ARC Chat safety limits.")
+            raise ValueError("vLLM resource request is outside ARC Research safety limits.")
         if not (1024 <= self.port <= 65535):
             raise ValueError("vLLM port must be between 1024 and 65535.")
         if not (1024 <= self.max_model_len <= 1_048_576):

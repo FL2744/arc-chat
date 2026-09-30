@@ -14,7 +14,7 @@ JupyterLite is the zero-infrastructure execution tier. It is appropriate for sma
 
 ## Why ARC is not directly wired from this page yet
 
-The existing ARC Chat helper is intentionally loopback-only. A hosted page must not receive permission to call that local control surface. The ARC card in `config.json` therefore remains disabled until an authenticated hosted gateway is validated.
+The existing ARC Research helper is intentionally loopback-only. A hosted page must not receive permission to call that local control surface. The ARC card in `config.json` therefore remains disabled until an authenticated hosted gateway is validated.
 
 Gateway code exists, but there is no Virginia Tech deployment or ARC provider adapter yet. Leave `gateway_url` empty until the OIDC client, static origin, and browser cookie path are approved. When configured, the client sends credentialed requests only to that HTTPS origin; the bundle builder injects the same origin into its Content Security Policy.
 

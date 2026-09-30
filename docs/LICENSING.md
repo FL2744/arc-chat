@@ -9,5 +9,5 @@ Publishing source code on GitHub does not by itself resolve copyright ownership 
 3. which license is appropriate for source, bundled third-party components, and documentation;
 4. what notices/attributions must ship in binary distributions.
 
-Until that decision is documented, release notes should describe ARC Chat as a preview/source-available project rather than claiming a specific open-source license.
+Until that decision is documented, release notes should describe ARC Research as a preview/source-available project rather than claiming a specific open-source license.
 

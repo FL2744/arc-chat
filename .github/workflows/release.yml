@@ -27,7 +27,7 @@ jobs:
         run: python -m pip install -r requirements.txt -r requirements-build.txt
       - name: Install packaged Chromium runtime
         run: python -m playwright install chromium
-      - name: Build ARC Chat.app
+      - name: Build ARC Research.app
         run: python macos/build.py
       - name: Build self-contained macOS package
         run: python distribution/build_portable.py
@@ -37,7 +37,7 @@ jobs:
         run: python distribution/smoke_portable.py dist/portable/ARC-Chat.app
       - name: Create archive and checksum
         run: |
-          ditto -c -k --sequesterRsrc --keepParent "dist/ARC Chat.app" ARC-Chat-macOS.zip
+          ditto -c -k --sequesterRsrc --keepParent "dist/ARC Research.app" ARC-Chat-macOS.zip
           shasum -a 256 ARC-Chat-macOS.zip > ARC-Chat-macOS.zip.sha256
           cp dist/portable/ARC-Chat-macOS-Portable.zip .
           cp dist/portable/ARC-Chat-macOS-Portable.zip.sha256 .
@@ -189,9 +189,9 @@ jobs:
           done
 
           cat > "$stage/README.md" <<EOF
-          # ARC Chat ${GITHUB_REF_NAME} downloads
+          # ARC Research ${GITHUB_REF_NAME} downloads
 
-          These files are the API-free distribution mirror for ARC Chat ${GITHUB_REF_NAME}.
+          These files are the API-free distribution mirror for ARC Research ${GITHUB_REF_NAME}.
           They were built by GitHub Actions from commit ${GITHUB_SHA} after the release test gates passed.
 
           - ARC-Chat-Windows.zip - Windows bootstrap

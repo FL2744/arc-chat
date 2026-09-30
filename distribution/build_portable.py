@@ -1,9 +1,9 @@
-"""Build a self-contained ARC Chat package for the current operating system.
+"""Build a self-contained ARC Research package for the current operating system.
 
 The release workflow installs Playwright Chromium into a known external browser
 directory before calling this script.  We copy only the headful Chromium and
 FFmpeg runtime into Playwright's bundled ``.local-browsers`` location; the
-separate Chromium headless shell is intentionally omitted because ARC Chat's
+separate Chromium headless shell is intentionally omitted because ARC Research's
 VT/OOD authentication flow must remain visible to the user.
 """
 
@@ -75,7 +75,7 @@ def clean_previous_package() -> None:
                 candidate.unlink()
         except PermissionError as exc:
             raise RuntimeError(
-                f"Cannot replace {candidate} because a packaged ARC Chat/Chromium process is still using it. "
+                f"Cannot replace {candidate} because a packaged ARC Research/Chromium process is still using it. "
                 "Quit the packaged app and close its visible ARC browser before rebuilding."
             ) from exc
 
@@ -130,7 +130,7 @@ def build() -> tuple[Path, Path, Path]:
     if platform.system() == "Darwin":
         # PyInstaller cannot safely process Playwright's nested Chromium.app as
         # individual collected binaries. Copy the complete browser bundle after
-        # freezing ARC Chat, then sign the complete nested bundle in one pass.
+        # freezing ARC Research, then sign the complete nested bundle in one pass.
         subprocess.run(
             ["codesign", "--force", "--deep", "--sign", "-", str(package)],
             check=True,

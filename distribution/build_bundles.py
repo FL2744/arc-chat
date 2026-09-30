@@ -1,4 +1,4 @@
-"""Build small cross-platform ARC Chat bootstrap bundles."""
+"""Build small cross-platform ARC Research bootstrap bundles."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def write_windows_launcher(path: Path) -> None:
     path.write_text(
         '@echo off\r\nsetlocal\r\ncd /d "%~dp0"\r\n'
         'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1"\r\n'
-        'if errorlevel 1 (echo. & echo ARC Chat stopped with an error. & pause)\r\n',
+        'if errorlevel 1 (echo. & echo ARC Research stopped with an error. & pause)\r\n',
         encoding="utf-8",
     )
 
@@ -65,7 +65,7 @@ def build(platform: str) -> tuple[Path, Path]:
             shutil.copy2(ROOT / name, root / name)
         if platform == "Windows":
             shutil.copy2(ROOT / "start.ps1", root / "start.ps1")
-            write_windows_launcher(root / "ARC Chat.cmd")
+            write_windows_launcher(root / "ARC Research.cmd")
         elif platform == "Linux":
             shutil.copy2(ROOT / "start.command", root / "start.command")
             os.chmod(root / "start.command", 0o755)

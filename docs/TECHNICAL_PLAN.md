@@ -1,4 +1,4 @@
-# ARC Chat: Technical Architecture and Product Plan
+# ARC Research: Technical Architecture and Product Plan
 
 **Status:** Proposed architecture for discussion and implementation  
 **Prepared by:** Alejandro Grenier  
@@ -7,7 +7,7 @@
 
 ## 1. Executive summary
 
-ARC Chat should become a low-friction research and programming environment that lets students use Python and AI without first learning the mechanics of HPC, while preserving a powerful advanced surface for users who do need direct access to ARC resources.
+ARC Research should become a low-friction research and programming environment that lets students use Python and AI without first learning the mechanics of HPC, while preserving a powerful advanced surface for users who do need direct access to ARC resources.
 
 The central product decision is to build **one application with two deliberately different experiences**:
 
@@ -22,7 +22,7 @@ The desired end state is a platform that can support three increasingly powerful
 
 1. **Classroom Python + ARC-hosted AI:** a nontechnical student can start a workspace, ask for a simple application or analysis, review generated Python, run it, and retrieve results.
 2. **Research workbench:** an advanced user can manage ARC workspaces, files, models, jobs, and reusable workflows without manually stitching together OOD, Jupyter, Slurm, tunnels, and model endpoints.
-3. **Application platform:** tools such as SUGAR or future research applications can consume ARC Chat's workspace/job/model services without being coupled to ARC Chat's UI.
+3. **Application platform:** tools such as SUGAR or future research applications can consume ARC Research's workspace/job/model services without being coupled to ARC Research's UI.
 
 The first implementation priority is classroom reliability. Advanced capabilities should be designed now, but added only after Student Mode is stable enough to support a real course deployment.
 
@@ -117,9 +117,9 @@ The application should not:
 - become a general autonomous coding agent that can run arbitrary commands without confirmation;
 - attempt to replace Open OnDemand, Jupyter, or Slurm;
 - store VT passwords;
-- require a central ARC Chat web service for the first production version;
+- require a central ARC Research web service for the first production version;
 - expose infrastructure complexity merely because it exists;
-- couple SUGAR or another application directly into the ARC Chat repository;
+- couple SUGAR or another application directly into the ARC Research repository;
 - guarantee that any arbitrary third-party model endpoint is safe or compatible;
 - treat a 240-student rollout as equivalent to a successful single-machine demo.
 
@@ -141,7 +141,7 @@ Student Mode is the default. The visible concepts should be approximately:
 The normal flow should be:
 
 ```text
-Open ARC Chat
+Open ARC Research
     ↓
 Course/profile check
     ↓
@@ -425,7 +425,7 @@ The visible Playwright browser is a strong security/product choice and should re
 
 Principles:
 
-- never collect VT passwords in ARC Chat;
+- never collect VT passwords in ARC Research;
 - never bypass MFA;
 - do not persist browser authentication profiles by default;
 - reuse the active browser session during a run;
@@ -459,7 +459,7 @@ Student Mode should translate the profile into a single high-level action: **Sta
 
 ## 10. Model architecture
 
-ARC Chat should treat model access as a service independent from code execution.
+ARC Research should treat model access as a service independent from code execution.
 
 ### 10.1 Supported model sources
 
@@ -625,7 +625,7 @@ Wait for health endpoint
     ↓
 Register model endpoint as service
     ↓
-Use from ARC Chat / another application
+Use from ARC Research / another application
     ↓
 Stop service → cancel job
 ```
@@ -638,13 +638,13 @@ A key design question is endpoint reachability. The service registry must distin
 - endpoint reachable only from ARC compute;
 - endpoint requiring an approved tunnel/proxy mechanism.
 
-ARC Chat should not invent insecure port exposure. If a vLLM instance is only reachable inside ARC, model calls can be relayed through the active ARC workspace until a supported direct-access method is established.
+ARC Research should not invent insecure port exposure. If a vLLM instance is only reachable inside ARC, model calls can be relayed through the active ARC workspace until a supported direct-access method is established.
 
 ---
 
 ## 14. Artifacts and pipelines
 
-Will's idea of passing outputs between programs becomes much easier if ARC Chat treats generated outputs as first-class artifacts rather than anonymous files.
+Will's idea of passing outputs between programs becomes much easier if ARC Research treats generated outputs as first-class artifacts rather than anonymous files.
 
 Suggested artifact record:
 
@@ -686,7 +686,7 @@ The application should orchestrate these steps, but each execution/resource muta
 
 ## 15. Security model
 
-Security is a product requirement, especially if ARC Chat becomes institutional software.
+Security is a product requirement, especially if ARC Research becomes institutional software.
 
 ### 15.1 Local helper
 
@@ -789,7 +789,7 @@ Do not persist browser cookies or API keys in this file.
 
 For a 240-student course, diagnostics are not optional.
 
-Add an `ARC Chat Doctor` that checks:
+Add an `ARC Research Doctor` that checks:
 
 - supported OS/app version;
 - packaged runtime health;
@@ -879,7 +879,7 @@ Do not implement silent auto-update initially. Prefer:
 Suggested default screen:
 
 ```text
-ARC Chat
+ARC Research
 
 Course: FL 2744                              Settings
 
@@ -1117,7 +1117,7 @@ Deliverables:
 - ARC shared model quick setup;
 - hide allocation/kernel/URL/endpoint details by default;
 - structured recovery messages;
-- `ARC Chat Doctor` first version.
+- `ARC Research Doctor` first version.
 
 Exit criteria:
 
@@ -1199,12 +1199,12 @@ Deliverables:
 
 Exit criteria:
 
-- advanced user can start a reviewed model service, use it, and stop/release its resources from ARC Chat;
+- advanced user can start a reviewed model service, use it, and stop/release its resources from ARC Research;
 - no insecure port exposure or hidden background allocation.
 
 ### Phase 6 — Artifacts, pipelines, and application integration
 
-**Goal:** make ARC Chat a platform rather than only a chat interface.
+**Goal:** make ARC Research a platform rather than only a chat interface.
 
 Deliverables:
 
@@ -1218,7 +1218,7 @@ A tool such as SUGAR can be used as an integration demonstration, but must remai
 
 Exit criteria:
 
-- one external application can request/use ARC resources through documented interfaces without importing ARC Chat UI code;
+- one external application can request/use ARC resources through documented interfaces without importing ARC Research UI code;
 - pipeline steps are reproducible and traceable.
 
 ### Phase 7 — Institutional hardening
@@ -1292,7 +1292,7 @@ These should remain true as the project grows:
 
 The project is succeeding when a student with no prior CS/HPC experience can:
 
-1. install/open ARC Chat;
+1. install/open ARC Research;
 2. authenticate using normal VT mechanisms;
 3. start a course workspace;
 4. obtain/connect a personal ARC model API key;
@@ -1313,7 +1313,7 @@ At the same time, the Advanced Mode preview is intended to let a researcher:
 6. expose those resources to a separate research application;
 7. understand exactly what resources are running and how to release them.
 
-That combination — **simple default experience, serious underlying capability** — is the core technical and product direction for ARC Chat.
+That combination — **simple default experience, serious underlying capability** — is the core technical and product direction for ARC Research.
 
 ---
 

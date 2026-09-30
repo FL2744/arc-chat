@@ -1,4 +1,4 @@
-"""Runtime settings for frozen ARC Chat builds."""
+"""Runtime settings for frozen ARC Research builds."""
 
 import os
 from pathlib import Path

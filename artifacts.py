@@ -1,4 +1,4 @@
-"""First-class artifact/provenance contracts for ARC Chat outputs."""
+"""First-class artifact/provenance contracts for ARC Research outputs."""
 
 from __future__ import annotations
 

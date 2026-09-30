@@ -1,4 +1,4 @@
-"""Execution-backend seam for ARC Chat.
+"""Execution-backend seam for ARC Research.
 
 The current implementation delegates to the proven bridge transport. Keeping
 the public workspace contract here lets a local backend and future managed ARC

@@ -1,4 +1,4 @@
-"""Versioned local command protocol and replay protection for ARC Chat."""
+"""Versioned local command protocol and replay protection for ARC Research."""
 
 from __future__ import annotations
 

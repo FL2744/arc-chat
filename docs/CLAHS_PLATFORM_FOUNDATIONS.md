@@ -4,7 +4,7 @@ Status: the v0.5 control-plane foundation and hosted gateway implementation are 
 
 ## Goal
 
-ARC Chat should become a thin control plane over existing Virginia Tech infrastructure rather than a replacement for it. The user-facing object is a **project/workspace/application**. ARC jobs, Jupyter servers, browser kernels, persistent services, and future cloud resources are provider-specific implementation details.
+ARC Research should become a thin control plane over existing Virginia Tech infrastructure rather than a replacement for it. The user-facing object is a **project/workspace/application**. ARC jobs, Jupyter servers, browser kernels, persistent services, and future cloud resources are provider-specific implementation details.
 
 ## Core contracts
 
@@ -31,7 +31,7 @@ The placement engine decides which *class* of infrastructure fits a workload. It
 
 `resolver.py` handles the multi-job problem. A previously linked active project job wins with high confidence. Explicit project metadata can establish a strong match. Unrelated active jobs never become an automatic attachment merely because they are running. Similar/tied candidates require human choice.
 
-The OOD browser adapter now follows the same principle. When several ready Jupyter sessions are visible, ARC Chat emits differentiated choices using bounded session-card context and waits for an explicit selection rather than connecting to the first button in DOM order.
+The OOD browser adapter now follows the same principle. When several ready Jupyter sessions are visible, ARC Research emits differentiated choices using bounded session-card context and waits for an explicit selection rather than connecting to the first button in DOM order.
 
 ### Applications and deployment plans
 
@@ -41,7 +41,7 @@ A planned provider such as the VT IT Common Platform can therefore be returned a
 
 ## Previous-workspace recovery
 
-ARC Chat already persisted a previous Jupyter base/notebook. The helper now treats that as a high-confidence project attachment: after authentication, a reachable prior workspace for the same course/profile can be resumed without launching another allocation. When several Jupyter tabs are open, the exact previously recorded server is preferred. Stale state falls back to normal visible OOD selection.
+ARC Research already persisted a previous Jupyter base/notebook. The helper now treats that as a high-confidence project attachment: after authentication, a reachable prior workspace for the same course/profile can be resumed without launching another allocation. When several Jupyter tabs are open, the exact previously recorded server is preferred. Stale state falls back to normal visible OOD selection.
 
 ## Student web surface
 
