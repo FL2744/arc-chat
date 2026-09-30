@@ -4,6 +4,8 @@
 
 One self-contained HTML interface plus a local Python browser/Jupyter helper. The helper opens a separate Chromium window for VT login/MFA; no VT passwords are entered into the chatbot. VPN must be enabled using your normal client.
 
+A simple web implementation can be found here: https://l1001.vt.domains/arc-chat.html
+
 ## Contributors
 
 ARC Chat was created by **William Taggart**. **Alejandro Grenier** is a major development contributor across the current architecture, reliability/security hardening, Windows and cross-platform packaging, Student Mode onboarding/UX, automated testing, and Advanced ARC workflows including Slurm and managed vLLM. See [`CONTRIBUTORS.md`](CONTRIBUTORS.md) and the Git history for attribution details.
