@@ -35,8 +35,8 @@ class JobSpec:
     gpu_type: str = "l40s"
     memory_gb: int | None = None
     qos: str = ""
-    output: str = "arc-chat-%j.log"
-    name: str = "arc-chat"
+    output: str = "arc-research-%j.log"
+    name: str = "arc-research"
 
     def __post_init__(self) -> None:
         if not ACCOUNT_RE.fullmatch(self.account):
@@ -227,6 +227,15 @@ class JobHistory:
         return cls(records, limit=limit)
 
 
+@dataclass(frozen=True)
+class CommandResult:
+    """Separated streams from a login-node command."""
+    stdout: str
+    stderr: str
+    returncode: int
+    timed_out: bool = False
+
+
 class CommandGateway(Protocol):
     async def run(self, command: str, *, stdin: str = "", timeout: float = 30.0) -> str: ...
 
@@ -246,6 +255,27 @@ class SshCommandGateway:
             raise ValueError("ARC Research currently supports documented Falcon login hosts only.")
         self.username = username
         self.host = host
+
+    async def run_detailed(self, command: str, *, stdin: str = "", timeout: float = 30.0) -> CommandResult:
+        """Run ``command`` and return stdout/stderr/exit code without raising on failure."""
+        ssh = shutil.which("ssh")
+        if not ssh:
+            raise RuntimeError("OpenSSH client is not installed or not on PATH.")
+        process = await asyncio.create_subprocess_exec(
+            ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=12", f"{self.username}@{self.host}", command,
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(stdin.encode()), timeout=timeout)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            return CommandResult("", "Timed out.", 124, True)
+        except asyncio.CancelledError:
+            process.kill()
+            await process.wait()
+            raise
+        return CommandResult(stdout.decode(errors="replace"), stderr.decode(errors="replace"), process.returncode or 0)
 
     async def run(self, command: str, *, stdin: str = "", timeout: float = 30.0) -> str:
         ssh = shutil.which("ssh")

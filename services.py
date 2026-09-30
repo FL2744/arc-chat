@@ -19,6 +19,12 @@ MODEL_PATH_RE = re.compile(r"^/common/data/models/[A-Za-z0-9_.+/-]{1,300}$")
 MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:/+-]{1,160}$")
 PARSER_RE = re.compile(r"^[A-Za-z0-9_.-]{0,64}$")
 API_KEY_RE = re.compile(r"^[A-Za-z0-9_.~+/=-]{16,256}$")
+QUANT_RE = re.compile(r"^[A-Za-z0-9_.-]{0,32}$")
+EXTRA_ARG_RE = re.compile(r"^[A-Za-z0-9_.:/=+,-]{1,200}$")
+ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+ENV_VALUE_RE = re.compile(r"^[A-Za-z0-9_.:/=+,@%-]{0,200}$")
+# vLLM options ARC Research manages itself; users may not override them via extra args.
+RESERVED_ARGS = {"--api-key", "--port", "--host", "--served-model-name", "--model"}
 
 
 @dataclass(frozen=True)
@@ -157,8 +163,31 @@ class VllmServiceSpec:
     tool_call_parser: str = "openai"
     reasoning_parser: str = ""
     api_key: str = ""
+    # Advanced options. tensor_parallel_size=0 means "one shard per GPU".
+    tensor_parallel_size: int = 0
+    quantization: str = ""
+    gpu_memory_utilization: float = 0.0
+    extra_args: tuple[str, ...] = ()
+    env_vars: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
+        if not (0 <= self.tensor_parallel_size <= 8):
+            raise ValueError("Tensor parallel size must be between 1 and 8 (or 0 for automatic).")
+        if self.tensor_parallel_size > self.gpus:
+            raise ValueError("Tensor parallel size cannot exceed the requested GPU count.")
+        if not QUANT_RE.fullmatch(self.quantization):
+            raise ValueError("Invalid quantization name.")
+        if not (self.gpu_memory_utilization == 0 or 0.1 <= self.gpu_memory_utilization <= 0.99):
+            raise ValueError("GPU memory utilization must be between 0.10 and 0.99.")
+        for arg in self.extra_args:
+            if not EXTRA_ARG_RE.fullmatch(arg):
+                raise ValueError(f"Extra vLLM argument '{arg[:40]}' contains unsupported characters.")
+            if arg.split("=", 1)[0] in RESERVED_ARGS:
+                raise ValueError(f"'{arg.split('=', 1)[0]}' is managed by ARC Research and cannot be overridden.")
+        for name, value in self.env_vars:
+            if not ENV_NAME_RE.fullmatch(name) or not ENV_VALUE_RE.fullmatch(value):
+                raise ValueError(f"Invalid environment variable '{name}'.")
+            validate_public_metadata({name: value}, label="vLLM environment variable")
         if not MODEL_PATH_RE.fullmatch(self.model_path):
             raise ValueError("vLLM model must use an ARC /common/data/models path.")
         if not MODEL_NAME_RE.fullmatch(self.served_model_name):
@@ -184,7 +213,7 @@ class VllmServiceSpec:
         args = [
             "vllm serve", self.model_path,
             "--served-model-name", self.served_model_name,
-            "--tensor-parallel-size", str(self.gpus),
+            "--tensor-parallel-size", str(self.tensor_parallel_size or self.gpus),
             "--max-model-len", str(self.max_model_len),
             "--port", str(self.port),
             "--api-key", key,
@@ -193,8 +222,14 @@ class VllmServiceSpec:
             args.extend(["--enable-auto-tool-choice", "--tool-call-parser", self.tool_call_parser])
         if self.reasoning_parser:
             args.extend(["--reasoning-parser", self.reasoning_parser])
+        if self.quantization:
+            args.extend(["--quantization", self.quantization])
+        if self.gpu_memory_utilization:
+            args.extend(["--gpu-memory-utilization", f"{self.gpu_memory_utilization:g}"])
+        args.extend(self.extra_args)
         # All values above are validated into shell-safe alphabets/numbers.
-        command = "module load vLLM\ncd \"$TMPDIR\"\n" + " \\\n  ".join(args)
+        exports = "".join(f"export {name}={value}\n" for name, value in self.env_vars)
+        command = "module load vLLM\ncd \"$TMPDIR\"\n" + exports + " \\\n  ".join(args)
         return JobSpec(
             account=self.account,
             command=command,
@@ -205,7 +240,7 @@ class VllmServiceSpec:
             gpu_type=self.gpu_type,
             qos=self.qos,
             output=f"vllm-{self.served_model_name.replace('/', '-') }-%j.log",
-            name="arc-chat-vllm",
+            name="arc-research-vllm",
         )
 
 
@@ -244,6 +279,24 @@ class VllmServiceManager:
         if node and NODE_RE.fullmatch(node):
             service.node = node
         return service
+
+    async def health(self, http, service: ManagedService, local_port: int | None = None) -> dict[str, Any]:
+        """Probe the tunnelled endpoint: /health then the model list. Returns a public status dict."""
+        base = f"http://127.0.0.1:{local_port or service.port}"
+        headers = {"Authorization": f"Bearer {service.api_key}"}
+        result: dict[str, Any] = {"healthy": False, "models": [], "detail": ""}
+        try:
+            async with http.get(base + "/health", headers=headers, timeout=5) as response:
+                result["healthy"] = response.status == 200
+                result["detail"] = f"/health returned HTTP {response.status}"
+            if result["healthy"]:
+                async with http.get(base + "/v1/models", headers=headers, timeout=5) as response:
+                    if response.status == 200:
+                        payload = await response.json()
+                        result["models"] = [m.get("id", "") for m in payload.get("data", []) if isinstance(m, dict)]
+        except Exception as exc:  # connection refused while the model is still loading is normal
+            result["detail"] = f"Endpoint not reachable yet ({type(exc).__name__}). The model may still be loading; check the logs."
+        return result
 
     async def stop(self, service: ManagedService) -> None:
         await self.jobs.cancel(service.job_id)

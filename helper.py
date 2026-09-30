@@ -13,6 +13,7 @@ from context_window import bounded_history, truncate_text
 from diagnostics import Doctor
 from errors import classify_error
 from integration import ProposalStore
+from research import ResearchService
 from jobs import JobHistory, JobSpec, RESOURCE_PROFILES, SlurmBackend, SshCommandGateway, get_resource_profile
 from model_providers import ARC_ENDPOINT, ModelCatalog, build_provider
 from ood import OODBrowserAdapter
@@ -175,6 +176,7 @@ class Bridge:
         self.project_registry = self.control_plane.projects
         self.workspace_registry = self.control_plane.workspaces
         self.provider_registry = self.control_plane.providers
+        self.research = ResearchService(self, self.recovery_path.parent if self.recovery_path else None)
         project = self.control_plane.current_project()
         if (
             self.last_job_id
@@ -268,6 +270,8 @@ class Bridge:
     def remember_secret(self, value):
         if isinstance(value, str) and len(value) >= 4:
             self.secret_values.add(value)
+            research = getattr(self, 'research', None)
+            if research: research.log.secrets.add(value)
 
     def redacted(self, value):
         values = set(self.secret_values)
@@ -904,6 +908,14 @@ class Bridge:
             qos=str(d.get('job_qos', 'fal_l40s_normal_base')).strip() or 'fal_l40s_normal_base',
             tool_call_parser=str(d.get('vllm_tool_parser', 'openai')).strip(),
             reasoning_parser=str(d.get('vllm_reasoning_parser', '')).strip(),
+            tensor_parallel_size=int(d.get('vllm_tp') or 0),
+            quantization=str(d.get('vllm_quantization', '')).strip(),
+            gpu_memory_utilization=float(d.get('vllm_gpu_util') or 0),
+            extra_args=tuple(str(d.get('vllm_extra_args', '')).split()),
+            env_vars=tuple(
+                (k.strip(), v.strip()) for k, _, v in (line.partition('=') for line in str(d.get('vllm_env', '')).splitlines())
+                if k.strip()
+            ),
         )
 
     def service_public(self):
@@ -921,6 +933,11 @@ class Bridge:
         }
 
     async def dispatch(self, action, d):
+        if action in ResearchService.ACTIONS:
+            text, events = await self.research.handle(action, d)
+            for event_type, payload in events:
+                await self.emit(event_type, **payload)
+            return text or 'Done.'
         if action=='quit':
             asyncio.get_running_loop().call_later(1,os.kill,os.getpid(),signal.SIGTERM)
             return 'Stopping helper and chat kernel. End the OOD job separately to release the allocation.'
@@ -1175,6 +1192,20 @@ class Bridge:
             )
             await self.emit('service', item=self.service_public())
             return 'SSH tunnel started. ARC Research can now use the managed vLLM endpoint through localhost.'
+        if action=='vllm_health':
+            if not self.vllm_service: raise ValueError('No managed vLLM service is tracked.')
+            tunnel_ok = bool(self.vllm_tunnel and self.vllm_tunnel.process and self.vllm_tunnel.process.returncode is None)
+            if not tunnel_ok:
+                await self.emit('vllm_health', item={'healthy': False, 'models': [], 'detail': 'Start the SSH tunnel to probe the endpoint.'})
+                return 'Start the SSH tunnel before checking endpoint health.'
+            health = await VllmServiceManager(self.slurm_backend(d)).health(self.http, self.vllm_service, self.vllm_tunnel.local_port)
+            await self.emit('vllm_health', item=health)
+            return 'vLLM endpoint is healthy.' if health['healthy'] else 'vLLM endpoint is not healthy yet.'
+        if action=='vllm_logs':
+            if not self.vllm_service: raise ValueError('No managed vLLM service is tracked.')
+            text = await self.slurm_backend(d).logs(self.vllm_service.job_id, int(d.get('lines') or 200))
+            await self.emit('job_logs', job_id=self.vllm_service.job_id, text=truncate_text(self.redacted(text), 64000))
+            return f'Loaded recent vLLM logs for job {self.vllm_service.job_id}.'
         if action=='vllm_stop':
             if not self.vllm_service: raise ValueError('No managed vLLM service is tracked.')
             if self.vllm_tunnel:
@@ -1463,6 +1494,12 @@ async def socket(request):
                     result={'type':'status','text':'Python input submitted.','request_id':envelope.id,'terminal':True}
                     bridge.replay.put(envelope.id,result)
                     await bridge.emit('status',text=result['text'],request_id=envelope.id,terminal=True)
+                elif d['action']=='command_cancel':
+                    text,events=await bridge.research.handle('command_cancel',d)
+                    for event_type,payload in events: await bridge.emit(event_type,**payload)
+                    result={'type':'status','text':text,'request_id':envelope.id,'terminal':True}
+                    bridge.replay.put(envelope.id,result)
+                    await bridge.emit('status',text=text,request_id=envelope.id,terminal=True)
                 elif d['action']=='interrupt':
                     if bridge.kernel: await bridge.api('POST',f'api/kernels/{bridge.kernel}/interrupt')
                     result={'type':'status','text':'Interrupt requested.','request_id':envelope.id,'terminal':True}
