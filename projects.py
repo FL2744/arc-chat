@@ -1,4 +1,4 @@
-"""Project-level state for ARC Chat and future CLAHS research applications.
+"""Project-level state for ARC Research and future CLAHS research applications.
 
 Projects are intentionally infrastructure-agnostic. They group workspaces,
 jobs, endpoints, artifacts, and deployments without embedding credentials or
@@ -122,7 +122,7 @@ class ProjectRecord:
 
 
 class ProjectRegistry:
-    """Bounded project registry used as ARC Chat's top-level recovery model."""
+    """Bounded project registry used as ARC Research's top-level recovery model."""
 
     def __init__(self, records: list[ProjectRecord] | None = None, *, limit: int = 100):
         self.limit = max(1, min(1000, int(limit)))

@@ -7,7 +7,7 @@ network ranges, Vault paths, or credentials that have not been assigned.
 
 ## Request
 
-Provision a CLAHS development tenant for the ARC Chat control-plane gateway and
+Provision a CLAHS development tenant for the ARC Research control-plane gateway and
 identify the process for requesting pre-production and production environments.
 The gateway will initially support authenticated project and application
 metadata, browser-workspace records, audit/events, and health/metrics endpoints.
@@ -57,7 +57,7 @@ flowchart LR
     Static[VT Domains static client]
     Lite[JupyterLite deployment]
     Proxy[OAuth2 Proxy and VT OIDC]
-    Gateway[ARC Chat hosted gateway]
+    Gateway[ARC Research hosted gateway]
     DB[(Approved PostgreSQL service)]
     ARC[ARC and Open OnDemand]
     Helper[Local per-user ARC helper]

@@ -12,7 +12,7 @@ authorizes, discover that user's allocations and resources, and request
 user-scoped Slurm/Jupyter actions. ARC must identify an approved delegation
 mechanism before a hosted ARC provider can be enabled.
 
-Until then, the local ARC Chat helper remains the compatibility path. It uses
+Until then, the local ARC Research helper remains the compatibility path. It uses
 the user's visible Open OnDemand browser session and/or the user's configured
 SSH authentication. The hosted gateway does not receive VT passwords, Duo
 codes, OOD cookies, SSH keys, or Jupyter auth tokens. The static `l1001` site
@@ -28,7 +28,7 @@ mechanism for a hosted server.
 
 | Capability | Hosted gateway requirement | Current local-helper fallback |
 | --- | --- | --- |
-| Authenticated-user mapping | Map the gateway's verified immutable VT subject to the ARC principal. Define mismatch and account-linking behavior without using email as the durable key. | User signs in through the visible OOD browser. SSH mode uses the locally configured ARC username/host and user's own SSH authentication. No VT password or MFA code is collected by ARC Chat. |
+| Authenticated-user mapping | Map the gateway's verified immutable VT subject to the ARC principal. Define mismatch and account-linking behavior without using email as the durable key. | User signs in through the visible OOD browser. SSH mode uses the locally configured ARC username/host and user's own SSH authentication. No VT password or MFA code is collected by ARC Research. |
 | Authorized allocation discovery | Return only allocations/accounts, clusters, and partitions the delegated user may use; include limits, expiry, and policy metadata needed for review. | Course profile can supply an allocation. The visible OOD launch form exposes available account choices; the user selects/reviews the allocation. The helper does not provide a hosted authoritative allocation API. |
 | Resource policy/preview | Validate account, cluster, partition, CPU, GPU type/count, memory, walltime, and any SU/cost estimate before submission. Clearly distinguish estimates from enforced limits. | The helper renders a Slurm job preview and exposes resource profiles; OOD launch remains a visible user-reviewed form. Enforcement is ultimately ARC/Slurm policy. |
 | Submit batch job | Idempotent, per-user job submission with a returned scheduler job ID and a way to reconcile a timed-out response without duplicate submission. | `SlurmBackend.submit` sends a reviewed script through the user's SSH connection with `sbatch --parsable`; the helper records the returned job ID locally. |
@@ -39,14 +39,14 @@ mechanism for a hosted server.
 | Interactive OOD launch | Create or identify a supported interactive Jupyter app/session for the delegated user, with explicit resource review and idempotent create behavior. Clarify whether the supported operation is OOD API, scheduler API, or another approved interface. | The user signs in visibly to `ood.arc.vt.edu`; the helper prepares the OOD form, exposes the account/resource selection, and clicks only a uniquely identified `Launch` control after review. |
 | Interactive session discovery | List the user's OOD/Jupyter sessions with opaque session IDs, job IDs, state, cluster, and creation time. Do not rely on dashboard DOM order. | The helper inspects the visible OOD session cards/links. Multiple ready Jupyter sessions produce explicit user choices; a previous exact association may be resumed. No hosted OOD HTML scraper exists. |
 | Safe Jupyter endpoint | Issue a user-scoped endpoint or short-lived brokered link without exposing reusable credentials in the URL, logs, API responses, or persistent metadata. Explain TLS, lifetime, audience, revocation, and browser access constraints. | The helper attaches to the Jupyter server opened in the user's authenticated browser, uses Jupyter's session/kernel APIs through that browser context, and stores local recovery metadata. It does not expose that browser session to the hosted gateway. |
-| Project/workspace correlation | Accept an opaque ARC Chat workspace/project correlation value in scheduler metadata where supported, or return a durable supported association mechanism. | The helper persists explicit user-selected resource/job-to-workspace associations locally. `ControlPlane` uses exact links and approved project metadata for recovery, never “only active job” or DOM ordering. |
+| Project/workspace correlation | Accept an opaque ARC Research workspace/project correlation value in scheduler metadata where supported, or return a durable supported association mechanism. | The helper persists explicit user-selected resource/job-to-workspace associations locally. `ControlPlane` uses exact links and approved project metadata for recovery, never “only active job” or DOM ordering. |
 | Delegation lifecycle | Define consent, token issuance/storage, scopes, refresh/revocation, expiry, audit attribution, and user offboarding. Prefer per-user delegation with narrow operations. | No server-side delegation is implemented. SSH uses the user's local auth; OOD uses the user's browser session. |
 | Resource usage | Return post-run usage metrics through supported APIs, including the stable job/account/cluster identity and units. | No unified provider adapter currently collects usage. ARC guidance may point to approved equivalents for `showjobusage`, `seff`, or job-utilization links. |
 
 ## Required semantic details
 
 ARC responses should include provider-owned identifiers separately from
-ARC Chat's opaque identifiers. At minimum, a normalized resource should map to
+ARC Research's opaque identifiers. At minimum, a normalized resource should map to
 these fields when ARC exposes them:
 
 ```json

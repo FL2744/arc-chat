@@ -7,7 +7,7 @@ support.mkdir(parents=True, exist_ok=True, mode=0o700)
 state = support / 'session.json'
 
 def dialog(text):
-    subprocess.run(['/usr/bin/osascript', '-e', 'on run argv\n display dialog (item 1 of argv) with title "ARC Chat" buttons {"OK"} default button "OK"\nend run', text])
+    subprocess.run(['/usr/bin/osascript', '-e', 'on run argv\n display dialog (item 1 of argv) with title "ARC Research" buttons {"OK"} default button "OK"\nend run', text])
 
 def reopen():
     try:
@@ -27,7 +27,7 @@ except BlockingIOError:
     for attempt in range(5):
         if reopen(): break
         time.sleep(1)
-    else: dialog('The ARC Chat helper is running, but its page is unavailable. Keep any existing chat tab open. See the startup log in Library/Application Support/ARC Chat/launcher.log.')
+    else: dialog('The ARC Research helper is running, but its page is unavailable. Keep any existing chat tab open. See the startup log in Library/Application Support/ARC Chat/launcher.log.')
     sys.exit(0)
 
 log_path = support / 'launcher.log'
@@ -68,7 +68,7 @@ with open(log_path, 'a') as log:
             urllib.request.urlopen('http://127.0.0.1:8765/',timeout=1).close()
         except Exception: pass
         else:
-            dialog('Port 8765 is already in use, possibly by ARC Chat in Terminal. Keep using that chat, or stop its helper with Control-C before opening this app.')
+            dialog('Port 8765 is already in use, possibly by ARC Research in Terminal. Keep using that chat, or stop its helper with Control-C before opening this app.')
             sys.exit(0)
         state.unlink(missing_ok=True)
         # Keep serving files from a stable path even if the .app is moved.
@@ -78,9 +78,9 @@ with open(log_path, 'a') as log:
             shutil.copy2(resources/name,app_files/name)
         result = subprocess.run([str(python),str(app_files/'helper.py')],cwd=support,env=env,stdout=log,stderr=log)
         if result.returncode:
-            dialog('ARC Chat could not start or stopped unexpectedly. Open the startup log at '+str(support/'launcher.log'))
+            dialog('ARC Research could not start or stopped unexpectedly. Open the startup log at '+str(support/'launcher.log'))
     except Exception as exc:
         print(repr(exc),file=log,flush=True)
-        dialog('ARC Chat setup failed. Check your internet connection and open the app again. Details: '+str(support/'launcher.log'))
+        dialog('ARC Research setup failed. Check your internet connection and open the app again. Details: '+str(support/'launcher.log'))
     finally:
         state.unlink(missing_ok=True)

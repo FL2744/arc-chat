@@ -1,6 +1,6 @@
-# ARC Chat macOS wrapper
+# ARC Research macOS wrapper
 
-Double-click `ARC Chat.app`. It opens the chat in your default browser and runs the helper in the background. Use **Quit helper** in the chat to stop it. Stop the OOD allocation separately when finished.
+Double-click `ARC Research.app`. It opens the chat in your default browser and runs the helper in the background. Use **Quit helper** in the chat to stop it. Stop the OOD allocation separately when finished.
 
 If the old Terminal helper is still running, stop it with Control-C first. The app never terminates an existing helper or other process occupying port 8765.
 

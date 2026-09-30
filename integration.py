@@ -1,4 +1,4 @@
-"""Stable local integration contracts for external ARC Chat applications.
+"""Stable local integration contracts for external ARC Research applications.
 
 The HTTP surface that uses these objects is intentionally read-mostly. External
 applications may submit proposals for human review, but cannot execute code,

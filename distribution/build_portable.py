@@ -1,9 +1,9 @@
-"""Build a self-contained ARC Chat package for the current operating system.
+"""Build a self-contained ARC Research package for the current operating system.
 
 The release workflow installs Playwright Chromium into a known external browser
 directory before calling this script.  We copy only the headful Chromium and
 FFmpeg runtime into Playwright's bundled ``.local-browsers`` location; the
-separate Chromium headless shell is intentionally omitted because ARC Chat's
+separate Chromium headless shell is intentionally omitted because ARC Research's
 VT/OOD authentication flow must remain visible to the user.
 """
 
@@ -51,10 +51,10 @@ def selected_browser_components(root: Path) -> list[Path]:
 def archive_name() -> str:
     system = platform.system()
     if system == "Windows":
-        return "ARC-Chat-Windows-Portable"
+        return "ARC-Research-Windows-Portable"
     if system == "Darwin":
-        return "ARC-Chat-macOS-Portable"
-    return "ARC-Chat-Linux-Portable"
+        return "ARC-Research-macOS-Portable"
+    return "ARC-Research-Linux-Portable"
 
 
 def checksum(path: Path) -> Path:
@@ -65,7 +65,7 @@ def checksum(path: Path) -> Path:
 
 
 def clean_previous_package() -> None:
-    for candidate in (DIST / "ARC-Chat", DIST / "ARC-Chat.app"):
+    for candidate in (DIST / "ARC-Research", DIST / "ARC-Research.app"):
         if not candidate.exists():
             continue
         try:
@@ -75,7 +75,7 @@ def clean_previous_package() -> None:
                 candidate.unlink()
         except PermissionError as exc:
             raise RuntimeError(
-                f"Cannot replace {candidate} because a packaged ARC Chat/Chromium process is still using it. "
+                f"Cannot replace {candidate} because a packaged ARC Research/Chromium process is still using it. "
                 "Quit the packaged app and close its visible ARC browser before rebuilding."
             ) from exc
 
@@ -105,7 +105,7 @@ def build() -> tuple[Path, Path, Path]:
         "--noconfirm",
         "--clean",
         "--onedir",
-        "--name=ARC-Chat",
+        "--name=ARC-Research",
         f"--add-data={ROOT / 'arc-chat.html'}:.",
         f"--add-data={ROOT / 'CONTRIBUTORS.md'}:.",
         f"--add-data={ROOT / 'SECURITY.md'}:.",
@@ -120,9 +120,9 @@ def build() -> tuple[Path, Path, Path]:
         args.append("--windowed")
     PyInstaller.__main__.run(args)
 
-    package = DIST / "ARC-Chat"
-    if platform.system() == "Darwin" and (DIST / "ARC-Chat.app").exists():
-        package = DIST / "ARC-Chat.app"
+    package = DIST / "ARC-Research"
+    if platform.system() == "Darwin" and (DIST / "ARC-Research.app").exists():
+        package = DIST / "ARC-Research.app"
     if not package.exists():
         raise RuntimeError(f"PyInstaller did not create the expected package: {package}")
 
@@ -130,7 +130,7 @@ def build() -> tuple[Path, Path, Path]:
     if platform.system() == "Darwin":
         # PyInstaller cannot safely process Playwright's nested Chromium.app as
         # individual collected binaries. Copy the complete browser bundle after
-        # freezing ARC Chat, then sign the complete nested bundle in one pass.
+        # freezing ARC Research, then sign the complete nested bundle in one pass.
         subprocess.run(
             ["codesign", "--force", "--deep", "--sign", "-", str(package)],
             check=True,

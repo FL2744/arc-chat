@@ -1,4 +1,4 @@
-"""Execution-provider and placement contracts for ARC Chat.
+"""Execution-provider and placement contracts for ARC Research.
 
 This module models capabilities rather than implementation vendors. ARC is the
 first full remote provider; JupyterLite is the zero-install browser provider.

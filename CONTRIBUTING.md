@@ -1,6 +1,6 @@
-# Contributing to ARC Chat
+# Contributing to ARC Research
 
-ARC Chat is intentionally conservative around authentication, remote execution, resource allocation, and research data. Changes should improve capability without weakening explicit human control.
+ARC Research is intentionally conservative around authentication, remote execution, resource allocation, and research data. Changes should improve capability without weakening explicit human control.
 
 ## Development rules
 

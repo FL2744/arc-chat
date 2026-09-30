@@ -60,7 +60,7 @@ class EndpointPolicy:
 
         ARC documents dedicated Open OnDemand LLM sessions as on-premises,
         OpenAI-compatible services with a unique API key per session.  The
-        documentation does not promise one permanent URL shape, so ARC Chat
+        documentation does not promise one permanent URL shape, so ARC Research
         accepts any HTTPS endpoint on the ARC DNS domain rather than inventing
         an undocumented fixed path.
         """

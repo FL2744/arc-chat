@@ -1,4 +1,4 @@
-"""Smoke-test a packaged ARC Chat directory without requiring ARC credentials."""
+"""Smoke-test a packaged ARC Research directory without requiring ARC credentials."""
 
 from __future__ import annotations
 
@@ -21,16 +21,16 @@ def free_port() -> int:
 
 def executable(package: Path) -> Path:
     if package.suffix == ".app":
-        mac = package / "Contents" / "MacOS" / "ARC-Chat"
+        mac = package / "Contents" / "MacOS" / "ARC-Research"
         if mac.exists():
             return mac
-    windows = package / "ARC-Chat.exe"
+    windows = package / "ARC-Research.exe"
     if windows.exists():
         return windows
-    unix = package / "ARC-Chat"
+    unix = package / "ARC-Research"
     if unix.exists():
         return unix
-    raise RuntimeError(f"ARC Chat executable not found in {package}")
+    raise RuntimeError(f"ARC Research executable not found in {package}")
 
 
 def assert_browser_is_bundled(package: Path) -> None:
@@ -67,7 +67,7 @@ def smoke(package: Path) -> None:
             body = b""
             while time.monotonic() < deadline:
                 if process.poll() is not None:
-                    raise RuntimeError(f"Packaged ARC Chat exited early with code {process.returncode}")
+                    raise RuntimeError(f"Packaged ARC Research exited early with code {process.returncode}")
                 try:
                     with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1) as response:
                         # arc-chat.html is intentionally self-contained and can
@@ -78,14 +78,14 @@ def smoke(package: Path) -> None:
                 except OSError:
                     time.sleep(0.2)
             else:
-                raise RuntimeError("Packaged ARC Chat did not become ready within 30 seconds")
+                raise RuntimeError("Packaged ARC Research did not become ready within 30 seconds")
             if b'id="main-content"' not in body or b'id="status"' not in body:
-                raise RuntimeError("Packaged ARC Chat served unexpected UI content")
+                raise RuntimeError("Packaged ARC Research served unexpected UI content")
             if not state.exists():
-                raise RuntimeError("Packaged ARC Chat did not persist its non-secret launch state")
+                raise RuntimeError("Packaged ARC Research did not persist its non-secret launch state")
             saved = json.loads(state.read_text(encoding="utf-8"))
             if not saved.get("url", "").startswith(f"http://127.0.0.1:{port}/#"):
-                raise RuntimeError("Packaged ARC Chat persisted an invalid launch URL")
+                raise RuntimeError("Packaged ARC Research persisted an invalid launch URL")
         finally:
             process.terminate()
             try:

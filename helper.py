@@ -6,12 +6,15 @@ from urllib.parse import urlsplit, urlunsplit, quote
 from aiohttp import web, ClientSession, ClientTimeout, WSMsgType, TCPConnector
 from playwright.async_api import async_playwright, TimeoutError as BrowserTimeout, Error as BrowserError
 from config import get_profile
+from envcompat import getenv
 from control_plane import ControlPlane
 from artifacts import ArtifactStore
 from context_window import bounded_history, truncate_text
 from diagnostics import Doctor
 from errors import classify_error
 from integration import ProposalStore
+from naming import generate_job_name
+from research import ResearchService
 from jobs import JobHistory, JobSpec, RESOURCE_PROFILES, SlurmBackend, SshCommandGateway, get_resource_profile
 from model_providers import ARC_ENDPOINT, ModelCatalog, build_provider
 from ood import OODBrowserAdapter
@@ -27,9 +30,9 @@ from workspaces import WorkspaceRegistry
 
 ROOT = Path(__file__).parent
 TOKEN = secrets.token_urlsafe(32)
-PORT = int(os.environ.get('ARC_CHAT_PORT', '8765'))
+PORT = int(getenv('PORT', '8765'))
 if not (1024 <= PORT <= 65535):
-    raise ValueError('ARC_CHAT_PORT must be between 1024 and 65535.')
+    raise ValueError('ARC_RESEARCH_PORT must be between 1024 and 65535.')
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_REMOTE_PATH_CHARS = 4096
 MAX_UPLOAD_NAME_CHARS = 255
@@ -174,6 +177,7 @@ class Bridge:
         self.project_registry = self.control_plane.projects
         self.workspace_registry = self.control_plane.workspaces
         self.provider_registry = self.control_plane.providers
+        self.research = ResearchService(self, self.recovery_path.parent if self.recovery_path else None)
         project = self.control_plane.current_project()
         if (
             self.last_job_id
@@ -184,10 +188,10 @@ class Bridge:
 
     @staticmethod
     def _recovery_path():
-        explicit = os.environ.get('ARC_CHAT_RECOVERY_STATE')
+        explicit = getenv('RECOVERY_STATE')
         if explicit:
             return Path(explicit).expanduser()
-        session = os.environ.get('ARC_CHAT_STATE')
+        session = getenv('STATE')
         if session:
             return Path(session).expanduser().with_name('recovery.json')
         if os.name == 'nt':
@@ -267,6 +271,8 @@ class Bridge:
     def remember_secret(self, value):
         if isinstance(value, str) and len(value) >= 4:
             self.secret_values.add(value)
+            research = getattr(self, 'research', None)
+            if research: research.log.secrets.add(value)
 
     def redacted(self, value):
         values = set(self.secret_values)
@@ -289,7 +295,7 @@ class Bridge:
     def persist_state(self):
         """Persist non-secret session metadata only when the launcher requests it."""
         self.persist_recovery_state()
-        target = os.environ.get('ARC_CHAT_STATE')
+        target = getenv('STATE')
         if not target:
             return
         payload = {
@@ -346,9 +352,9 @@ class Bridge:
                 host = (urlsplit(page.url).hostname or '').lower()
                 if host == 'ood.arc.vt.edu':
                     await self.set_state(AppState.ARC_READY, 'Existing authenticated ARC tab restored.', force=True)
-                    return 'Existing ARC tab restored. Return to ARC Chat and continue setup when ready.'
+                    return 'Existing ARC tab restored. Return to ARC Research and continue setup when ready.'
                 await self.set_state(AppState.AUTH_REQUIRED, 'Use the existing visible browser tab to complete VT login/MFA.', force=True)
-                return 'Existing ARC/login tab restored. Complete login/MFA there, then return to ARC Chat and continue. If the page is blank or stalled, enable VT VPN and reload that tab.'
+                return 'Existing ARC/login tab restored. Complete login/MFA there, then return to ARC Research and continue. If the page is blank or stalled, enable VT VPN and reload that tab.'
         else:
             page = self.ood_page = await self.context.new_page()
         try:
@@ -363,7 +369,7 @@ class Bridge:
                 await self.set_state(AppState.DEGRADED, 'ARC navigation timed out; the visible tab was preserved.', force=True)
             return ('ARC navigation has not completed. The browser tab is still open: if a VT login/MFA page is visible, continue there. '
                     'If it is blank or cannot connect, enable VT VPN and reload the tab. '
-                    'Also try https://ood.arc.vt.edu/ in your usual browser to check network access. Then return to ARC Chat and continue setup.')
+                    'Also try https://ood.arc.vt.edu/ in your usual browser to check network access. Then return to ARC Research and continue setup.')
         except BrowserError as exc:
             # Keep the same tab so retrying never discards an authentication flow.
             await self.set_state(AppState.DEGRADED, 'ARC browser navigation failed; the visible tab was preserved.', force=True)
@@ -374,7 +380,7 @@ class Bridge:
             await self.set_state(AppState.DEGRADED, f'ARC returned HTTP {response.status}.', force=True)
             return f'ARC returned HTTP {response.status}. Inspect the browser page and check VPN/session access before continuing.'
         await self.set_state(AppState.AUTH_REQUIRED, 'Complete VT login/MFA in the visible browser.', force=True)
-        return 'ARC navigation started. Complete VT login/MFA in the browser, then return to ARC Chat and continue. If the page stalls, check VT VPN and reload it.'
+        return 'ARC navigation started. Complete VT login/MFA in the browser, then return to ARC Research and continue. If the page stalls, check VT VPN and reload it.'
 
     async def prepare(self, account):
         if not self.context: raise ValueError('Open ARC first.')
@@ -410,7 +416,7 @@ class Bridge:
         )
         if selected_account:
             return 'ARC workspace form is ready. Review the visible cluster, account, GPU, and walltime, then launch when ready.'
-        return 'ARC workspace form is ready. Choose an allocation you are authorized to use; ARC Chat will keep the selection visible for review before launch.'
+        return 'ARC workspace form is ready. Choose an allocation you are authorized to use; ARC Research will keep the selection visible for review before launch.'
 
     async def recover_previous_workspace_url(self):
         """Return an authenticated prior Jupyter URL when it is still live.
@@ -500,7 +506,7 @@ class Bridge:
         await self.set_state(AppState.ARC_READY, 'Several ready ARC workspaces need a user selection.', force=True)
         await self.emit('workspace_choices', items=items)
         await self.emit('workspace_setup', stage='choose_session')
-        return f'Found {len(items)} ready Jupyter workspaces. Choose the intended workspace in ARC Chat; nothing was connected automatically.'
+        return f'Found {len(items)} ready Jupyter workspaces. Choose the intended workspace in ARC Research; nothing was connected automatically.'
 
     async def connect_choice(self, choice_id, kernel_name='python3'):
         locator = self.connect_choices.get(str(choice_id or ''))
@@ -884,7 +890,7 @@ class Bridge:
             gpu_type=gpu_type,
             memory_gb=memory,
             qos=qos,
-            name=str(d.get('job_name', 'arc-chat')).strip(),
+            name=str(d.get('job_name') or '').strip() or generate_job_name(activity='job', project=(self.project_registry.current().manifest.name if self.project_registry.current() else ''), existing=[j.name for j in self.job_history.list()]),
         )
 
     def vllm_spec(self, d):
@@ -903,6 +909,14 @@ class Bridge:
             qos=str(d.get('job_qos', 'fal_l40s_normal_base')).strip() or 'fal_l40s_normal_base',
             tool_call_parser=str(d.get('vllm_tool_parser', 'openai')).strip(),
             reasoning_parser=str(d.get('vllm_reasoning_parser', '')).strip(),
+            tensor_parallel_size=int(d.get('vllm_tp') or 0),
+            quantization=str(d.get('vllm_quantization', '')).strip(),
+            gpu_memory_utilization=float(d.get('vllm_gpu_util') or 0),
+            extra_args=tuple(str(d.get('vllm_extra_args', '')).split()),
+            env_vars=tuple(
+                (k.strip(), v.strip()) for k, _, v in (line.partition('=') for line in str(d.get('vllm_env', '')).splitlines())
+                if k.strip()
+            ),
         )
 
     def service_public(self):
@@ -920,6 +934,11 @@ class Bridge:
         }
 
     async def dispatch(self, action, d):
+        if action in ResearchService.ACTIONS:
+            text, events = await self.research.handle(action, d)
+            for event_type, payload in events:
+                await self.emit(event_type, **payload)
+            return text or 'Done.'
         if action=='quit':
             asyncio.get_running_loop().call_later(1,os.kill,os.getpid(),signal.SIGTERM)
             return 'Stopping helper and chat kernel. End the OOD job separately to release the allocation.'
@@ -1173,7 +1192,21 @@ class Bridge:
                 metadata={'remote_node':self.vllm_service.node, 'remote_port':self.vllm_service.port},
             )
             await self.emit('service', item=self.service_public())
-            return 'SSH tunnel started. ARC Chat can now use the managed vLLM endpoint through localhost.'
+            return 'SSH tunnel started. ARC Research can now use the managed vLLM endpoint through localhost.'
+        if action=='vllm_health':
+            if not self.vllm_service: raise ValueError('No managed vLLM service is tracked.')
+            tunnel_ok = bool(self.vllm_tunnel and self.vllm_tunnel.process and self.vllm_tunnel.process.returncode is None)
+            if not tunnel_ok:
+                await self.emit('vllm_health', item={'healthy': False, 'models': [], 'detail': 'Start the SSH tunnel to probe the endpoint.'})
+                return 'Start the SSH tunnel before checking endpoint health.'
+            health = await VllmServiceManager(self.slurm_backend(d)).health(self.http, self.vllm_service, self.vllm_tunnel.local_port)
+            await self.emit('vllm_health', item=health)
+            return 'vLLM endpoint is healthy.' if health['healthy'] else 'vLLM endpoint is not healthy yet.'
+        if action=='vllm_logs':
+            if not self.vllm_service: raise ValueError('No managed vLLM service is tracked.')
+            text = await self.slurm_backend(d).logs(self.vllm_service.job_id, int(d.get('lines') or 200))
+            await self.emit('job_logs', job_id=self.vllm_service.job_id, text=truncate_text(self.redacted(text), 64000))
+            return f'Loaded recent vLLM logs for job {self.vllm_service.job_id}.'
         if action=='vllm_stop':
             if not self.vllm_service: raise ValueError('No managed vLLM service is tracked.')
             if self.vllm_tunnel:
@@ -1462,6 +1495,12 @@ async def socket(request):
                     result={'type':'status','text':'Python input submitted.','request_id':envelope.id,'terminal':True}
                     bridge.replay.put(envelope.id,result)
                     await bridge.emit('status',text=result['text'],request_id=envelope.id,terminal=True)
+                elif d['action']=='command_cancel':
+                    text,events=await bridge.research.handle('command_cancel',d)
+                    for event_type,payload in events: await bridge.emit(event_type,**payload)
+                    result={'type':'status','text':text,'request_id':envelope.id,'terminal':True}
+                    bridge.replay.put(envelope.id,result)
+                    await bridge.emit('status',text=text,request_id=envelope.id,terminal=True)
                 elif d['action']=='interrupt':
                     if bridge.kernel: await bridge.api('POST',f'api/kernels/{bridge.kernel}/interrupt')
                     result={'type':'status','text':'Interrupt requested.','request_id':envelope.id,'terminal':True}
@@ -1508,16 +1547,16 @@ async def lifecycle(app):
 
 async def launch(app):
     url=f'http://127.0.0.1:{PORT}/#'+TOKEN
-    if os.environ.get('ARC_CHAT_BROWSER_SMOKE'):
+    if getenv('BROWSER_SMOKE'):
         smoke_pw = await async_playwright().start()
         try:
             smoke_browser = await smoke_pw.chromium.launch(headless=True, channel='chromium')
             await smoke_browser.close()
         finally:
             await smoke_pw.stop()
-    if os.environ.get('ARC_CHAT_STATE'):
+    if getenv('STATE'):
         bridge.persist_state()
-    if not os.environ.get('ARC_CHAT_NO_OPEN'):
+    if not getenv('NO_OPEN'):
         asyncio.get_running_loop().call_later(1,webbrowser.open,url)
 
 def create_app(*, include_lifecycle=True, include_launch=False):
@@ -1542,5 +1581,5 @@ def create_app(*, include_lifecycle=True, include_launch=False):
 
 if __name__=='__main__':
     app=create_app(include_lifecycle=True, include_launch=True)
-    print('Opening local ARC Chat. Keep this terminal open. Ctrl-C stops the helper.')
+    print('Opening local ARC Research. Keep this terminal open. Ctrl-C stops the helper.')
     web.run_app(app,host='127.0.0.1',port=PORT,access_log=None)

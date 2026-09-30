@@ -1,4 +1,4 @@
-"""Configuration and course-profile loading for ARC Chat.
+"""Configuration and course-profile loading for ARC Research.
 
 Profiles deliberately contain policy, not secrets.  A profile may reference an
 environment variable for an allocation, but a personal allocation is never
@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+
+from envcompat import getenv
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -140,7 +142,7 @@ def load_profiles(path: str | os.PathLike[str] | None = None) -> dict[str, Cours
     """Load optional JSON profiles and overlay the safe built-ins."""
 
     profiles = dict(BUILTIN_PROFILES)
-    selected_path = path or os.environ.get("ARC_CHAT_PROFILE_FILE")
+    selected_path = path or getenv("PROFILE_FILE")
     if not selected_path:
         return profiles
     profile_path = Path(selected_path).expanduser()
@@ -166,7 +168,7 @@ def load_profiles(path: str | os.PathLike[str] | None = None) -> dict[str, Cours
 
 def get_profile(profile_id: str | None = None, path: str | os.PathLike[str] | None = None) -> CourseProfile:
     profiles = load_profiles(path)
-    requested = profile_id or os.environ.get("ARC_CHAT_PROFILE", "fl2744")
+    requested = profile_id or getenv("PROFILE", "fl2744")
     if requested not in profiles:
         raise ValueError(f"Unknown course profile {requested!r}. Available: {', '.join(sorted(profiles))}")
     return profiles[requested]

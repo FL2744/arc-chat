@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal standard-library client for ARC Chat's local review API.
+"""Minimal standard-library client for ARC Research's local review API.
 
 Examples:
   python examples/integration_client.py --token TOKEN status
@@ -7,7 +7,7 @@ Examples:
   python examples/integration_client.py --token TOKEN propose-job --summary "Analyze report.csv"
 
 The client cannot execute code, submit/cancel Slurm jobs, or start/stop model
-services. ``propose-job`` only adds a review proposal to ARC Chat Advanced Mode.
+services. ``propose-job`` only adds a review proposal to ARC Research Advanced Mode.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ def call(base: str, token: str, path: str, *, method: str = "GET", body=None):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="http://127.0.0.1:8765")
-    parser.add_argument("--token", required=True, help="Token from the ARC Chat local URL fragment")
+    parser.add_argument("--token", required=True, help="Token from the ARC Research local URL fragment")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status")
     sub.add_parser("artifacts")

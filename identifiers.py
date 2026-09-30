@@ -19,6 +19,7 @@ ID_PREFIXES = {
     "provider_resource": "prsrc",
     "endpoint": "ep",
     "job": "job",
+    "run": "run",
     "deployment": "dep",
     "artifact": "art",
     "audit_event": "audit",

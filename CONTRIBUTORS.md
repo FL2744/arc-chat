@@ -1,6 +1,6 @@
-# ARC Chat contributors
+# ARC Research contributors
 
-ARC Chat began as a Virginia Tech teaching/research prototype and is developed as a small collaborative project.
+ARC Research began as a Virginia Tech teaching/research prototype and is developed as a small collaborative project.
 
 - **William Taggart** - project creator; established the original FL 2744 classroom use case and project direction.
 - **Alejandro Grenier** - major development contributor across the current architecture, reliability/security hardening, Windows and cross-platform packaging, Student Mode onboarding/UX, automated testing, and Advanced ARC workflows including Slurm and managed vLLM.

@@ -108,7 +108,7 @@ class Doctor:
 
         path = ".arc-chat-doctor-" + uuid.uuid4().hex[:10] + ".txt"
         try:
-            await b.api("PUT", "api/contents/" + b.quote_path(path), {"type": "file", "format": "text", "content": "ARC Chat Doctor"})
+            await b.api("PUT", "api/contents/" + b.quote_path(path), {"type": "file", "format": "text", "content": "ARC Research Doctor"})
             checks.append(DiagnosticCheck("remote_write", "pass", "Remote workspace write succeeded"))
         except Exception as exc:
             checks.append(DiagnosticCheck("remote_write", "fail", "Remote workspace write failed", type(exc).__name__))
@@ -122,8 +122,8 @@ class Doctor:
             checks.append(DiagnosticCheck("kernel_smoke", "attention", "Kernel smoke test skipped", "The kernel is busy; do not interrupt user code."))
         else:
             try:
-                output = await b.workspace.execute('print("ARC Chat Doctor smoke test")')
-                checks.append(DiagnosticCheck("kernel_smoke", "pass" if "ARC Chat Doctor" in output else "attention", "Kernel execution smoke test completed"))
+                output = await b.workspace.execute('print("ARC Research Doctor smoke test")')
+                checks.append(DiagnosticCheck("kernel_smoke", "pass" if "ARC Research Doctor" in output else "attention", "Kernel execution smoke test completed"))
             except Exception as exc:
                 checks.append(DiagnosticCheck("kernel_smoke", "fail", "Kernel execution smoke test failed", type(exc).__name__))
         return checks

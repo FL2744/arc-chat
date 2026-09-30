@@ -1,4 +1,4 @@
-"""Provider-neutral workspace records for ARC Chat's control plane."""
+"""Provider-neutral workspace records for ARC Research's control plane."""
 
 from __future__ import annotations
 

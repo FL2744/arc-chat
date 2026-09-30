@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+
+from envcompat import getenv
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -149,7 +151,7 @@ def _manifest_from_mapping(value: Mapping[str, Any]) -> ApplicationManifest:
 
 
 def load_applications(path: str | os.PathLike[str] | None = None) -> ApplicationRegistry:
-    selected = path or os.environ.get("ARC_CHAT_APP_FILE")
+    selected = path or getenv("APP_FILE")
     if not selected:
         return ApplicationRegistry()
     app_path = Path(selected).expanduser()

@@ -6,4 +6,4 @@ for candidate in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/pytho
     exec "$candidate" "$RESOURCES/launcher.py"
   fi
 done
-/usr/bin/osascript -e 'display dialog "ARC Chat requires Python 3.10 or newer. Install Python from python.org, then open ARC Chat again." with title "ARC Chat" buttons {"OK"} default button "OK"'
+/usr/bin/osascript -e 'display dialog "ARC Research requires Python 3.10 or newer. Install Python from python.org, then open ARC Research again." with title "ARC Research" buttons {"OK"} default button "OK"'

@@ -1,4 +1,4 @@
-"""Build small cross-platform ARC Chat bootstrap bundles."""
+"""Build small cross-platform ARC Research bootstrap bundles."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 COMMON = (
-    "helper.py", "arc-chat.html", "requirements.txt", "config.py", "state.py",
+    "helper.py", "arc-chat.html", "envcompat.py", "naming.py", "safety.py", "workload.py", "discovery.py", "runs.py", "sshkeys.py", "bugreport.py", "catalog.py", "applog.py", "terminal.py", "connection.py", "planner.py", "project_extras.py", "research.py", "requirements.txt", "config.py", "state.py",
     "model_providers.py", "diagnostics.py", "ood.py", "workspace.py",
     "protocol.py", "security.py", "context_window.py", "artifacts.py",
     "jobs.py", "services.py", "integration.py", "projects.py", "providers.py",
@@ -28,7 +28,7 @@ def write_windows_launcher(path: Path) -> None:
     path.write_text(
         '@echo off\r\nsetlocal\r\ncd /d "%~dp0"\r\n'
         'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1"\r\n'
-        'if errorlevel 1 (echo. & echo ARC Chat stopped with an error. & pause)\r\n',
+        'if errorlevel 1 (echo. & echo ARC Research stopped with an error. & pause)\r\n',
         encoding="utf-8",
     )
 
@@ -59,20 +59,20 @@ def checksum(path: Path) -> Path:
 def build(platform: str) -> tuple[Path, Path]:
     DIST.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory() as temporary:
-        root = Path(temporary) / f"ARC-Chat-{platform}"
+        root = Path(temporary) / f"ARC-Research-{platform}"
         root.mkdir()
         for name in COMMON:
             shutil.copy2(ROOT / name, root / name)
         if platform == "Windows":
             shutil.copy2(ROOT / "start.ps1", root / "start.ps1")
-            write_windows_launcher(root / "ARC Chat.cmd")
+            write_windows_launcher(root / "ARC Research.cmd")
         elif platform == "Linux":
             shutil.copy2(ROOT / "start.command", root / "start.command")
             os.chmod(root / "start.command", 0o755)
             write_linux_launcher(root / "arc-chat")
         else:
             raise ValueError(platform)
-        archive = DIST / f"ARC-Chat-{platform}.zip"
+        archive = DIST / f"ARC-Research-{platform}.zip"
         zip_tree(root, archive)
     return archive, checksum(archive)
 
