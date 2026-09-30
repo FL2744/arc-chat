@@ -30,8 +30,8 @@ python distribution/build_student_web.py
 
 This creates:
 
-- `dist/ARC-Chat-Student-Web.zip`
-- `dist/ARC-Chat-Student-Web.zip.sha256`
+- `dist/ARC-Research-Student-Web.zip`
+- `dist/ARC-Research-Student-Web.zip.sha256`
 
 The build validates the public configuration, rejects credential-like content and non-HTTPS application targets, and emits a flat static archive.
 

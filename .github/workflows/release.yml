@@ -32,24 +32,24 @@ jobs:
       - name: Build self-contained macOS package
         run: python distribution/build_portable.py
       - name: Verify self-contained macOS signature
-        run: codesign --verify --deep --strict dist/portable/ARC-Chat.app
+        run: codesign --verify --deep --strict dist/portable/ARC-Research.app
       - name: Smoke-test self-contained macOS package
-        run: python distribution/smoke_portable.py dist/portable/ARC-Chat.app
+        run: python distribution/smoke_portable.py dist/portable/ARC-Research.app
       - name: Create archive and checksum
         run: |
-          ditto -c -k --sequesterRsrc --keepParent "dist/ARC Research.app" ARC-Chat-macOS.zip
-          shasum -a 256 ARC-Chat-macOS.zip > ARC-Chat-macOS.zip.sha256
-          cp dist/portable/ARC-Chat-macOS-Portable.zip .
-          cp dist/portable/ARC-Chat-macOS-Portable.zip.sha256 .
+          ditto -c -k --sequesterRsrc --keepParent "dist/ARC Research.app" ARC-Research-macOS.zip
+          shasum -a 256 ARC-Research-macOS.zip > ARC-Research-macOS.zip.sha256
+          cp dist/portable/ARC-Research-macOS-Portable.zip .
+          cp dist/portable/ARC-Research-macOS-Portable.zip.sha256 .
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ARC-Chat-macOS
+          name: ARC-Research-macOS
           path: |
-            ARC-Chat-macOS.zip
-            ARC-Chat-macOS.zip.sha256
-            ARC-Chat-macOS-Portable.zip
-            ARC-Chat-macOS-Portable.zip.sha256
+            ARC-Research-macOS.zip
+            ARC-Research-macOS.zip.sha256
+            ARC-Research-macOS-Portable.zip
+            ARC-Research-macOS-Portable.zip.sha256
 
   windows:
     name: Build Windows portable preview
@@ -71,19 +71,19 @@ jobs:
       - name: Build self-contained Windows package
         run: python distribution/build_portable.py
       - name: Smoke-test self-contained Windows package
-        run: python distribution/smoke_portable.py dist/portable/ARC-Chat
+        run: python distribution/smoke_portable.py dist/portable/ARC-Research
       - name: Stage Windows release artifacts
         shell: pwsh
         run: |
-          Copy-Item dist/portable/ARC-Chat-Windows-Portable.zip .
-          Copy-Item dist/portable/ARC-Chat-Windows-Portable.zip.sha256 .
+          Copy-Item dist/portable/ARC-Research-Windows-Portable.zip .
+          Copy-Item dist/portable/ARC-Research-Windows-Portable.zip.sha256 .
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ARC-Chat-Windows-Portable
+          name: ARC-Research-Windows-Portable
           path: |
-            ARC-Chat-Windows-Portable.zip
-            ARC-Chat-Windows-Portable.zip.sha256
+            ARC-Research-Windows-Portable.zip
+            ARC-Research-Windows-Portable.zip.sha256
 
   source:
     name: Package source and bootstrap previews
@@ -93,26 +93,26 @@ jobs:
         uses: actions/checkout@v4
       - name: Create source archive and checksum
         run: |
-          git archive --format=zip --prefix=arc-chat-${GITHUB_REF_NAME}/ -o ARC-Chat-source.zip HEAD
-          sha256sum ARC-Chat-source.zip > ARC-Chat-source.zip.sha256
+          git archive --format=zip --prefix=arc-research-${GITHUB_REF_NAME}/ -o ARC-Research-source.zip HEAD
+          sha256sum ARC-Research-source.zip > ARC-Research-source.zip.sha256
           python distribution/build_bundles.py Windows Linux
           python distribution/build_student_web.py
-          cp dist/ARC-Chat-Windows.zip dist/ARC-Chat-Windows.zip.sha256 .
-          cp dist/ARC-Chat-Linux.zip dist/ARC-Chat-Linux.zip.sha256 .
-          cp dist/ARC-Chat-Student-Web.zip dist/ARC-Chat-Student-Web.zip.sha256 .
+          cp dist/ARC-Research-Windows.zip dist/ARC-Research-Windows.zip.sha256 .
+          cp dist/ARC-Research-Linux.zip dist/ARC-Research-Linux.zip.sha256 .
+          cp dist/ARC-Research-Student-Web.zip dist/ARC-Research-Student-Web.zip.sha256 .
       - name: Upload source artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ARC-Chat-source
+          name: ARC-Research-source
           path: |
-            ARC-Chat-source.zip
-            ARC-Chat-source.zip.sha256
-            ARC-Chat-Windows.zip
-            ARC-Chat-Windows.zip.sha256
-            ARC-Chat-Linux.zip
-            ARC-Chat-Linux.zip.sha256
-            ARC-Chat-Student-Web.zip
-            ARC-Chat-Student-Web.zip.sha256
+            ARC-Research-source.zip
+            ARC-Research-source.zip.sha256
+            ARC-Research-Windows.zip
+            ARC-Research-Windows.zip.sha256
+            ARC-Research-Linux.zip
+            ARC-Research-Linux.zip.sha256
+            ARC-Research-Student-Web.zip
+            ARC-Research-Student-Web.zip.sha256
 
   publish:
     name: Publish preview release
@@ -127,17 +127,17 @@ jobs:
       - name: Download macOS artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ARC-Chat-macOS
+          name: ARC-Research-macOS
           path: release
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ARC-Chat-Windows-Portable
+          name: ARC-Research-Windows-Portable
           path: release
       - name: Download source artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ARC-Chat-source
+          name: ARC-Research-source
           path: release
       - name: Verify release payload
         shell: bash
@@ -145,20 +145,20 @@ jobs:
           set -euo pipefail
           ls -lh release
           for file in \
-            ARC-Chat-macOS-Portable.zip \
-            ARC-Chat-macOS-Portable.zip.sha256 \
-            ARC-Chat-Windows-Portable.zip \
-            ARC-Chat-Windows-Portable.zip.sha256 \
-            ARC-Chat-macOS.zip \
-            ARC-Chat-macOS.zip.sha256 \
-            ARC-Chat-source.zip \
-            ARC-Chat-source.zip.sha256 \
-            ARC-Chat-Windows.zip \
-            ARC-Chat-Windows.zip.sha256 \
-            ARC-Chat-Linux.zip \
-            ARC-Chat-Linux.zip.sha256 \
-            ARC-Chat-Student-Web.zip \
-            ARC-Chat-Student-Web.zip.sha256; do
+            ARC-Research-macOS-Portable.zip \
+            ARC-Research-macOS-Portable.zip.sha256 \
+            ARC-Research-Windows-Portable.zip \
+            ARC-Research-Windows-Portable.zip.sha256 \
+            ARC-Research-macOS.zip \
+            ARC-Research-macOS.zip.sha256 \
+            ARC-Research-source.zip \
+            ARC-Research-source.zip.sha256 \
+            ARC-Research-Windows.zip \
+            ARC-Research-Windows.zip.sha256 \
+            ARC-Research-Linux.zip \
+            ARC-Research-Linux.zip.sha256 \
+            ARC-Research-Student-Web.zip \
+            ARC-Research-Student-Web.zip.sha256; do
             test -s "release/$file"
           done
       - name: Publish API-free download branch
@@ -175,16 +175,16 @@ jobs:
           trap 'rm -rf "$stage"' EXIT
 
           for file in \
-            ARC-Chat-macOS.zip \
-            ARC-Chat-macOS.zip.sha256 \
-            ARC-Chat-source.zip \
-            ARC-Chat-source.zip.sha256 \
-            ARC-Chat-Windows.zip \
-            ARC-Chat-Windows.zip.sha256 \
-            ARC-Chat-Linux.zip \
-            ARC-Chat-Linux.zip.sha256 \
-            ARC-Chat-Student-Web.zip \
-            ARC-Chat-Student-Web.zip.sha256; do
+            ARC-Research-macOS.zip \
+            ARC-Research-macOS.zip.sha256 \
+            ARC-Research-source.zip \
+            ARC-Research-source.zip.sha256 \
+            ARC-Research-Windows.zip \
+            ARC-Research-Windows.zip.sha256 \
+            ARC-Research-Linux.zip \
+            ARC-Research-Linux.zip.sha256 \
+            ARC-Research-Student-Web.zip \
+            ARC-Research-Student-Web.zip.sha256; do
             cp "release/$file" "$stage/$file"
           done
 
@@ -194,11 +194,11 @@ jobs:
           These files are the API-free distribution mirror for ARC Research ${GITHUB_REF_NAME}.
           They were built by GitHub Actions from commit ${GITHUB_SHA} after the release test gates passed.
 
-          - ARC-Chat-Windows.zip - Windows bootstrap
-          - ARC-Chat-macOS.zip - macOS bootstrap app
-          - ARC-Chat-Linux.zip - Linux bootstrap
-          - ARC-Chat-source.zip - source archive
-          - ARC-Chat-Student-Web.zip - static browser-first student client for VT Domains-style hosting
+          - ARC-Research-Windows.zip - Windows bootstrap
+          - ARC-Research-macOS.zip - macOS bootstrap app
+          - ARC-Research-Linux.zip - Linux bootstrap
+          - ARC-Research-source.zip - source archive
+          - ARC-Research-Student-Web.zip - static browser-first student client for VT Domains-style hosting
 
           The bootstrap packages require internet access on first launch and install their runtime dependencies/Chromium locally.
           The much larger self-contained Windows/macOS bundles are retained as CI artifacts rather than normal Git objects.
@@ -209,7 +209,7 @@ jobs:
           git checkout --orphan "$ASSET_BRANCH"
           git rm -rf .
           cp -a "$stage"/. .
-          git add README.md ARC-Chat-*.zip ARC-Chat-*.zip.sha256
+          git add README.md ARC-Research-*.zip ARC-Research-*.zip.sha256
           git commit -m "Publish ${GITHUB_REF_NAME} bootstrap downloads"
           git push --force origin "HEAD:refs/heads/$ASSET_BRANCH"
 
@@ -220,16 +220,16 @@ jobs:
         run: |
           set -euo pipefail
           for file in \
-            ARC-Chat-macOS.zip \
-            ARC-Chat-macOS.zip.sha256 \
-            ARC-Chat-source.zip \
-            ARC-Chat-source.zip.sha256 \
-            ARC-Chat-Windows.zip \
-            ARC-Chat-Windows.zip.sha256 \
-            ARC-Chat-Linux.zip \
-            ARC-Chat-Linux.zip.sha256 \
-            ARC-Chat-Student-Web.zip \
-            ARC-Chat-Student-Web.zip.sha256; do
+            ARC-Research-macOS.zip \
+            ARC-Research-macOS.zip.sha256 \
+            ARC-Research-source.zip \
+            ARC-Research-source.zip.sha256 \
+            ARC-Research-Windows.zip \
+            ARC-Research-Windows.zip.sha256 \
+            ARC-Research-Linux.zip \
+            ARC-Research-Linux.zip.sha256 \
+            ARC-Research-Student-Web.zip \
+            ARC-Research-Student-Web.zip.sha256; do
             url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${ASSET_BRANCH}/${file}"
             echo "Verifying $url"
             curl --fail --silent --show-error --location --head \

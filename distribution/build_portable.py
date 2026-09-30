@@ -51,10 +51,10 @@ def selected_browser_components(root: Path) -> list[Path]:
 def archive_name() -> str:
     system = platform.system()
     if system == "Windows":
-        return "ARC-Chat-Windows-Portable"
+        return "ARC-Research-Windows-Portable"
     if system == "Darwin":
-        return "ARC-Chat-macOS-Portable"
-    return "ARC-Chat-Linux-Portable"
+        return "ARC-Research-macOS-Portable"
+    return "ARC-Research-Linux-Portable"
 
 
 def checksum(path: Path) -> Path:
@@ -65,7 +65,7 @@ def checksum(path: Path) -> Path:
 
 
 def clean_previous_package() -> None:
-    for candidate in (DIST / "ARC-Chat", DIST / "ARC-Chat.app"):
+    for candidate in (DIST / "ARC-Research", DIST / "ARC-Research.app"):
         if not candidate.exists():
             continue
         try:
@@ -105,7 +105,7 @@ def build() -> tuple[Path, Path, Path]:
         "--noconfirm",
         "--clean",
         "--onedir",
-        "--name=ARC-Chat",
+        "--name=ARC-Research",
         f"--add-data={ROOT / 'arc-chat.html'}:.",
         f"--add-data={ROOT / 'CONTRIBUTORS.md'}:.",
         f"--add-data={ROOT / 'SECURITY.md'}:.",
@@ -120,9 +120,9 @@ def build() -> tuple[Path, Path, Path]:
         args.append("--windowed")
     PyInstaller.__main__.run(args)
 
-    package = DIST / "ARC-Chat"
-    if platform.system() == "Darwin" and (DIST / "ARC-Chat.app").exists():
-        package = DIST / "ARC-Chat.app"
+    package = DIST / "ARC-Research"
+    if platform.system() == "Darwin" and (DIST / "ARC-Research.app").exists():
+        package = DIST / "ARC-Research.app"
     if not package.exists():
         raise RuntimeError(f"PyInstaller did not create the expected package: {package}")
 

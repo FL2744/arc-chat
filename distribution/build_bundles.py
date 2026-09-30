@@ -15,7 +15,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 COMMON = (
-    "helper.py", "arc-chat.html", "requirements.txt", "config.py", "state.py",
+    "helper.py", "arc-chat.html", "envcompat.py", "naming.py", "safety.py", "workload.py", "discovery.py", "runs.py", "sshkeys.py", "bugreport.py", "catalog.py", "applog.py", "terminal.py", "connection.py", "planner.py", "project_extras.py", "research.py", "requirements.txt", "config.py", "state.py",
     "model_providers.py", "diagnostics.py", "ood.py", "workspace.py",
     "protocol.py", "security.py", "context_window.py", "artifacts.py",
     "jobs.py", "services.py", "integration.py", "projects.py", "providers.py",
@@ -59,7 +59,7 @@ def checksum(path: Path) -> Path:
 def build(platform: str) -> tuple[Path, Path]:
     DIST.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory() as temporary:
-        root = Path(temporary) / f"ARC-Chat-{platform}"
+        root = Path(temporary) / f"ARC-Research-{platform}"
         root.mkdir()
         for name in COMMON:
             shutil.copy2(ROOT / name, root / name)
@@ -72,7 +72,7 @@ def build(platform: str) -> tuple[Path, Path]:
             write_linux_launcher(root / "arc-chat")
         else:
             raise ValueError(platform)
-        archive = DIST / f"ARC-Chat-{platform}.zip"
+        archive = DIST / f"ARC-Research-{platform}.zip"
         zip_tree(root, archive)
     return archive, checksum(archive)
 

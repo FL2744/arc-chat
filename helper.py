@@ -13,6 +13,7 @@ from context_window import bounded_history, truncate_text
 from diagnostics import Doctor
 from errors import classify_error
 from integration import ProposalStore
+from naming import generate_job_name
 from research import ResearchService
 from jobs import JobHistory, JobSpec, RESOURCE_PROFILES, SlurmBackend, SshCommandGateway, get_resource_profile
 from model_providers import ARC_ENDPOINT, ModelCatalog, build_provider
@@ -889,7 +890,7 @@ class Bridge:
             gpu_type=gpu_type,
             memory_gb=memory,
             qos=qos,
-            name=str(d.get('job_name', 'arc-chat')).strip(),
+            name=str(d.get('job_name') or '').strip() or generate_job_name(activity='job', project=(self.project_registry.current().manifest.name if self.project_registry.current() else ''), existing=[j.name for j in self.job_history.list()]),
         )
 
     def vllm_spec(self, d):

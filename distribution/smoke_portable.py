@@ -21,13 +21,13 @@ def free_port() -> int:
 
 def executable(package: Path) -> Path:
     if package.suffix == ".app":
-        mac = package / "Contents" / "MacOS" / "ARC-Chat"
+        mac = package / "Contents" / "MacOS" / "ARC-Research"
         if mac.exists():
             return mac
-    windows = package / "ARC-Chat.exe"
+    windows = package / "ARC-Research.exe"
     if windows.exists():
         return windows
-    unix = package / "ARC-Chat"
+    unix = package / "ARC-Research"
     if unix.exists():
         return unix
     raise RuntimeError(f"ARC Research executable not found in {package}")

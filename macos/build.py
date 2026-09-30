@@ -6,7 +6,7 @@ app=root/'dist/ARC Research.app'
 app.parent.mkdir(exist_ok=True)
 subprocess.run(['osacompile','-o',str(app),str(root/'macos/app.applescript')],check=True)
 resources=app/'Contents/Resources'
-for name in ('helper.py','arc-chat.html','requirements.txt','config.py','state.py','model_providers.py','diagnostics.py','ood.py','workspace.py','protocol.py','security.py','context_window.py','artifacts.py','jobs.py','services.py','integration.py','projects.py','providers.py','resolver.py','workspaces.py','control_plane.py','apps.py','identifiers.py','errors.py','version.py','profiles.example.json','applications.example.json','CONTRIBUTORS.md','SUPPORT.md','SECURITY.md'):
+for name in ('helper.py','arc-chat.html','requirements.txt','config.py','state.py','model_providers.py','diagnostics.py','ood.py','workspace.py','protocol.py','security.py','context_window.py','artifacts.py','jobs.py','services.py','integration.py','projects.py','providers.py','resolver.py','workspaces.py','control_plane.py','apps.py','identifiers.py','errors.py','envcompat.py','naming.py','safety.py','workload.py','discovery.py','runs.py','sshkeys.py','bugreport.py','catalog.py','applog.py','terminal.py','connection.py','planner.py','project_extras.py','research.py','version.py','profiles.example.json','applications.example.json','CONTRIBUTORS.md','SUPPORT.md','SECURITY.md'):
     shutil.copy2(root/name,resources/name)
 for name in ('launcher.py','launch.sh'):
     shutil.copy2(root/'macos'/name,resources/name)

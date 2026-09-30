@@ -10,6 +10,19 @@ A simple web implementation can be found here: https://l1001.vt.domains/arc-chat
 
 ARC Research was created by **William Taggart**. **Alejandro Grenier** is a major development contributor across the current architecture, reliability/security hardening, Windows and cross-platform packaging, Student Mode onboarding/UX, automated testing, and Advanced ARC workflows including Slurm and managed vLLM. See [`CONTRIBUTORS.md`](CONTRIBUTORS.md) and the Git history for attribution details.
 
+## What ARC Research does
+
+ARC Research is an advanced client for Virginia Tech ARC researchers. The lifecycle is **Connect → Inspect resources → Configure workload → Launch → Monitor → Interact → Collect results**. In Advanced mode the sidebar has a tab for each step:
+
+- **Connect**: ARC username check (not your email), SSH key generation/inspection, a staged connection test (username, SSH, allocation access), and live partition/queue data with explainable resource recommendations.
+- **Workload**: a structured, validated workload specification (allocation, resources, environment, job, runtime, model) with auto-generated job names, script review, JSON direct edit, saved configurations and export. Jobs always run as compute jobs.
+- **Terminal**: every command, including model-generated ones, is reviewed before it runs. Heavy commands are redirected to compute jobs instead of running on the login node. The surface shows login vs compute context, separate stdout/stderr, history and cancel.
+- **Models**: catalog discovered from ARC's model directory (search, filters, favorites, recents, memory guidance), plus managed vLLM with advanced options, health check and logs.
+- **Data**: run history (duplicate, modify, rerun, export) and project notes.
+- **Report a problem & logs** (Session tab): reviewable, secret-redacted bug reports and a structured diagnostic log (normal/verbose/debug).
+
+See [`docs/ARC_RESEARCH_STATUS.md`](docs/ARC_RESEARCH_STATUS.md) for the requirement map and what still needs validation against a real ARC account. For local development copy `.env.example` to `.env` (git-ignored); legacy `ARC_CHAT_*` variables still work.
+
 ## Downloads
 
 [Windows bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.4.1/ARC-Chat-Windows.zip) | [macOS bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.4.1/ARC-Chat-macOS.zip) | [Linux bootstrap](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.4.1/ARC-Chat-Linux.zip) | [Source archive](https://raw.githubusercontent.com/FL2744/arc-chat/release-assets-v0.4.1/ARC-Chat-source.zip) | [Release notes](https://github.com/FL2744/arc-chat/blob/v0.4.1/docs/RELEASE_v0.4.1.md)

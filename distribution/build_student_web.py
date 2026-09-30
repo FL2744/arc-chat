@@ -124,7 +124,7 @@ def build_archive(output_dir: Path = DEFAULT_DIST) -> tuple[Path, Path]:
     # Re-serialize validated JSON for deterministic public deployment output.
     (stage / "config.json").write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-    archive = output_dir / "ARC-Chat-Student-Web.zip"
+    archive = output_dir / "ARC-Research-Student-Web.zip"
     if archive.exists():
         archive.unlink()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
